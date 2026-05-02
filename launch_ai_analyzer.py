@@ -6,7 +6,7 @@ from sklearn.preprocessing import LabelEncoder
 import joblib
 import os
 
-st.set_page_config(page_title="🔧 Analyseur AI Diagnostic Launch X431", layout="wide")
+st.set_page_config(page_title="🔧 Analyseur AI Diagnostic YNS", layout="wide")
 
 # 🧠 Charger/Entraîner le modèle une seule fois
 @st.cache_resource
@@ -108,7 +108,7 @@ def get_recommendation(dtc):
     })
 
 # 🖥️ Interface Streamlit (Français)
-st.title("🔧 Analyseur AI Diagnostic Launch X431")
+st.title("🔧 Analyseur AI Diagnostic YNS")
 st.markdown("### 📊 Analyse intelligente des défauts automobiles")
 st.markdown("Téléchargez le fichier CSV exporté depuis votre scanner Launch. L'IA analysera les codes DTC, prédira la sévérité et donnera des recommandations étape par étape.")
 
@@ -197,7 +197,7 @@ else:
     P0420,1500,35,105
     ```
     
-    ### 🔧 Comment exporter depuis Launch X431:
+    ### 🔧 Comment exporter depuis YNS:
     1. Effectuez un diagnostic complet
     2. Allez dans "Rapport" ou "Export"
     3. Choisissez "Exporter en CSV"
