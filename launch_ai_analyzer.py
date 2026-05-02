@@ -6,7 +6,7 @@ from sklearn.preprocessing import LabelEncoder
 import joblib
 import os
 
-st.set_page_config(page_title="🔧 Analyseur AI Diagnostic Launch X431", layout="wide")
+st.set_page_config(page_title="🔧 Analyseur AI Diagnostic LKHIFE", layout="wide")
 
 # 🧠 Charger/Entraîner le modèle une seule fois
 @st.cache_resource
