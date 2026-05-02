@@ -1,214 +1,143 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
-import joblib
-import os
 
-st.set_page_config(page_title="🔧 Analyseur AI Diagnostic YNS", layout="wide")
+# 📝 إعدادات الصفحة
+st.set_page_config(page_title="AutoDiag AI Pro", layout="wide", page_icon="")
 
-# 🧠 Charger/Entraîner le modèle une seule fois
+# 🎨 تخصيص CSS بسيط
+st.markdown("""
+<style>
+    .main { background-color: #f5f5f5; }
+    h1 { color: #004d40; text-align: center; }
+    .stDataFrame { border-radius: 10px; }
+    .metric-card { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+</style>
+""", unsafe_allow_html=True)
+
+# 🧠 قاعدة البيانات (DTC Database)
+DTC_DB = {
+    'P0171': {'fr': 'Système trop pauvre (Banque 1)', 'ar': 'نظام فقير جداً (بنك 1)', 'action_fr': 'Vérifier fuites vide, MAF, pression carburant', 'action_ar': 'تفقد تسريب الهواء، حساس MAF، ضغط الوقود'},
+    'P0300': {'fr': 'Ratés d\'allumage multiples', 'ar': 'احتراق عشوائي متعدد', 'action_fr': 'Tester bougies, bobines, compression', 'action_ar': 'افحص البوجيات، الكويلات، والكومبراس'},
+    'P0420': {'fr': 'Efficacité catalyseur faible', 'ar': 'كفاءة الكاتاليزر منخفضة', 'action_fr': 'Vérifier capteurs O2, fuites échappement', 'action_ar': 'تفقد حساسات O2 وتسريب العادم'},
+    'P0128': {'fr': 'Thermostat température basse', 'ar': 'ترموستات حرارة منخفضة', 'action_fr': 'Remplacer thermostat', 'action_ar': 'بدل الترموستات'},
+    'P0101': {'fr': 'Débitmètre d\'air (MAF) performance', 'ar': 'حساس تدفق الهواء (MAF)', 'action_fr': 'Nettoyer ou remplacer MAF', 'action_ar': 'نظف أو بدل حساس MAF'},
+}
+
+# 🧠 تدريب النموذج (Cached)
 @st.cache_resource
 def train_model():
-    # Données d'entraînement réalistes (DTC + Freeze Frame)
     data = {
-        'DTC_Type': ['P0171', 'P0300', 'P0420', 'P0128', 'P0101', 'P0442', 'P0172', 'P0301', 'P0455', 'P0440'],
-        'RPM': [800, 2200, 1500, 750, 2800, 900, 2000, 2400, 1100, 1000],
-        'Load_%': [15, 45, 35, 10, 60, 20, 40, 50, 25, 18],
-        'Temp_C': [90, 95, 105, 70, 110, 88, 92, 98, 85, 87],
-        'Severity': ['Medium', 'High', 'Medium', 'Low', 'High', 'Low', 'Medium', 'High', 'Low', 'Medium']
+        'DTC': ['P0171', 'P0300', 'P0420', 'P0128', 'P0101'],
+        'RPM': [800, 2200, 1500, 750, 2800],
+        'Load': [15, 45, 35, 10, 60],
+        'Temp': [90, 95, 105, 70, 110],
+        'Severity': ['Medium', 'High', 'Medium', 'Low', 'High']
     }
     df = pd.DataFrame(data)
     le = LabelEncoder()
-    df['DTC_Type_Enc'] = le.fit_transform(df['DTC_Type'])
-    X = df[['DTC_Type_Enc', 'RPM', 'Load_%', 'Temp_C']]
+    df['DTC_Enc'] = le.fit_transform(df['DTC'])
+    X = df[['DTC_Enc', 'RPM', 'Load', 'Temp']]
     y = df['Severity']
     model = RandomForestClassifier(n_estimators=50, max_depth=3, random_state=42)
     model.fit(X, y)
     return model, le
 
-def predict_severity(model, le, dtc, rpm, load, temp):
+def get_severity(model, le, dtc, rpm, load, temp):
     try:
         dtc_enc = le.transform([dtc])[0]
-    except ValueError:
-        dtc_enc = le.transform([le.classes_[0]])[0]
+    except:
+        dtc_enc = 0
     return model.predict([[dtc_enc, rpm, load, temp]])[0]
 
-# 📚 Base de données des codes DTC (Français)
-DTC_DB = {
-    'P0171': {
-        'name': '🔧 Système trop pauvre (Banque 1)',
-        'priority': 'Medium',
-        'causes': 'Fuite de vide, capteur MAF, capteur O2, pression de carburant',
-        'action': '✅ Vérifier les tuyaux d\'admission, nettoyer MAF, tester pression carburant'
-    },
-    'P0300': {
-        'name': '🔥 Ratemés d\'allumage multiples/aléatoires',
-        'priority': 'High',
-        'causes': 'Bougies, bobines, injecteurs, perte de compression',
-        'action': '✅ Inspecter système d\'allumage, test de compression, vérifier fuel trim'
-    },
-    'P0420': {
-        'name': '⚠️ Efficacité du catalyseur inférieure au seuil',
-        'priority': 'Medium',
-        'causes': 'Catalyseur défectueux, capteurs O2, fuites échappement',
-        'action': '✅ Vérifier capteurs O2 avant/après catalyseur, inspecter fuites'
-    },
-    'P0128': {
-        'name': '🌡️ Thermostat de liquide de refroidissement',
-        'priority': 'Low',
-        'causes': 'Thermostat ouvert, niveau bas, capteur défectueux',
-        'action': '✅ Remplacer thermostat, vérifier niveau liquide, tester capteur'
-    },
-    'P0101': {
-        'name': '💨 Capteur MAF - Plage/Performance',
-        'priority': 'High',
-        'causes': 'MAF sale, problème câblage, fuite de vide, filtre à air bouché',
-        'action': '✅ Nettoyer/remplacer MAF, vérifier câblage, inspecter admission'
-    },
-    'P0442': {
-        'name': '💨 Petite fuite EVAP détectée',
-        'priority': 'Low',
-        'causes': 'Bouchon carburant mal serré, fuite dans les tuyaux',
-        'action': '✅ Serrer bouchon carburant, vérifier tuyaux EVAP'
-    },
-    'P0172': {
-        'name': '🔧 Système trop riche (Banque 1)',
-        'priority': 'Medium',
-        'causes': 'Capteur MAF, injecteurs qui fuient, pression carburant élevée',
-        'action': '✅ Nettoyer MAF, vérifier injecteurs, tester régulateur pression'
-    },
-    'P0301': {
-        'name': '🔥 Ratemés d\'allumage cylindre 1',
-        'priority': 'High',
-        'causes': 'Bougie cylindre 1, bobine cylindre 1, injecteur cylindre 1',
-        'action': '✅ Remplacer bougie cylindre 1, tester bobine, nettoyer injecteur'
-    },
-    'P0455': {
-        'name': '💨 Grande fuite EVAP détectée',
-        'priority': 'Low',
-        'causes': 'Bouchon carburant manquant/desserré, grosse fuite EVAP',
-        'action': '✅ Vérifier/remplacer bouchon carburant, inspecter système EVAP'
-    },
-    'P0440': {
-        'name': '💨 Système EVAP - Dysfonctionnement',
-        'priority': 'Medium',
-        'causes': 'Problème système EVAP, vanne purge, capteur pression',
-        'action': '✅ Tester vanne purge EVAP, vérifier capteur, inspecter tuyaux'
-    },
-}
+# 🌐 اختيار اللغة
+lang = st.sidebar.selectbox("🌐 Langue / Language", ["Français", "العربية"])
 
-def get_recommendation(dtc):
-    return DTC_DB.get(dtc.upper(), {
-        'name': '⚠️ Code DTC inconnu',
-        'priority': 'Medium',
-        'causes': 'Nécessite un diagnostic manuel',
-        'action': '✅ Consulter manuel de service, vérifier câblage, effacer code et retester'
-    })
+# 🖥️ الواجهة الرئيسية
+if lang == "العربية":
+    st.title("🚗 محلل الأعطال الذكي للسيارات")
+    st.info("ارفع ملف CSV من جهاز الفحص (Launch/Autel) ليحلل لك الأعطال.")
+    upload_label = "📤 رفع ملف CSV"
+    col1, col2, col3 = "عالي 🔴", "متوسط ", "منخفض 🟢"
+    search_ph = "بحث عن كود العطل..."
+else:
+    st.title(" AI Car Diagnostic Analyzer")
+    st.info("Upload CSV from your scanner (Launch/Autel) for AI analysis.")
+    upload_label = "📤 Upload CSV Report"
+    col1, col2, col3 = "High 🔴", "Medium 🟡", "Low 🟢"
+    search_ph = "Search DTC code..."
 
-# 🖥️ Interface Streamlit (Français)
-st.title("🔧 Analyseur AI Diagnostic YNS")
-st.markdown("### 📊 Analyse intelligente des défauts automobiles")
-st.markdown("Téléchargez le fichier CSV exporté depuis votre scanner Launch. L'IA analysera les codes DTC, prédira la sévérité et donnera des recommandations étape par étape.")
-
-uploaded_file = st.file_uploader("📤 Télécharger le rapport CSV", type=["csv"])
+# 📂 رفع الملف
+uploaded_file = st.sidebar.file_uploader(upload_label, type=["csv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     
-    st.subheader("📋 Aperçu des données brutes")
-    st.dataframe(df.head())
+    # تكييف الأعمدة تلقائياً
+    col_mapping = {
+        'DTC_Code': 'DTC_Code', 'Code': 'DTC_Code', 'DTC': 'DTC_Code',
+        'RPM': 'RPM', 'Engine RPM': 'RPM',
+        'Load_%': 'Load_%', 'Load': 'Load_%', 'Calculated Load': 'Load_%',
+        'Temp_C': 'Temp_C', 'Coolant Temp': 'Temp_C', 'Temperature': 'Temp_C'
+    }
+    df.rename(columns={k: v for k, v in col_mapping.items() if k in df.columns}, inplace=True)
 
-    # Vérifier les colonnes requises
-    required_cols = ['DTC_Code', 'RPM', 'Load_%', 'Temp_C']
-    if not all(col in df.columns for col in required_cols):
-        st.error(f"❌ Colonnes manquantes. Attendu: {required_cols}")
-        st.info("💡 Colonnes disponibles: " + ", ".join(df.columns.tolist()))
-        st.stop()
+    if 'DTC_Code' in df.columns:
+        st.subheader("📊 Raw Data Preview")
+        st.dataframe(df.head())
+        
+        # 🔍 البحث
+        search_term = st.sidebar.text_input(search_ph)
+        if search_term:
+            df = df[df['DTC_Code'].astype(str).str.contains(search_term, case=False)]
 
-    # Entraîner le modèle
-    if st.session_state.get('model') is None:
-        with st.spinner("🤖 Entraînement du modèle AI en cours..."):
-            model, le = train_model()
-            st.session_state['model'] = model
-            st.session_state['le'] = le
-        st.success("✅ Modèle AI prêt!")
+        # 🤖 تحليل AI
+        model, le = train_model()
+        results = []
+        for _, row in df.iterrows():
+            dtc = str(row['DTC_Code']).strip()
+            sev = get_severity(model, le, dtc, row.get('RPM', 0), row.get('Load_%', 0), row.get('Temp_C', 0))
+            
+            info = DTC_DB.get(dtc, {'fr': 'Unknown DTC', 'ar': 'كود غير معروف', 'action_fr': 'Check manual', 'action_ar': 'راجع الدليل'})
+            
+            results.append({
+                'DTC': dtc,
+                'Description': info['ar'] if lang == "العربية" else info['fr'],
+                'Severity': sev,
+                'Action': info['action_ar'] if lang == "العربية" else info['action_fr'],
+                'RPM': row.get('RPM', 0),
+                'Load': row.get('Load_%', 0)
+            })
 
-    # Analyse AI
-    st.subheader("🔍 Résultats de l'analyse AI")
-    results = []
-    for _, row in df.iterrows():
-        dtc = str(row['DTC_Code']).strip()
-        severity = predict_severity(st.session_state['model'], st.session_state['le'], dtc, row['RPM'], row['Load_%'], row['Temp_C'])
-        rec = get_recommendation(dtc)
-        results.append({
-            'DTC': dtc,
-            'Description': rec['name'],
-            'Sévérité_AI': severity,
-            'Causes_probables': rec['causes'],
-            'Actions_recommandées': rec['action'],
-            'RPM_figés': row['RPM'],
-            'Charge_%': row['Load_%'],
-            'Température_°C': row['Temp_C']
-        })
+        res_df = pd.DataFrame(results)
+        
+        # 📈 لوحة القيادة (Dashboard)
+        c1, c2, c3 = st.columns(3)
+        c1.metric(col1, len(res_df[res_df['Severity'] == 'High']))
+        c2.metric(col2, len(res_df[res_df['Severity'] == 'Medium']))
+        c3.metric(col3, len(res_df[res_df['Severity'] == 'Low']))
+        
+        #  الرسم البياني
+        if len(res_df) > 0:
+            fig = px.scatter(res_df, x='RPM', y='Load', color='Severity', 
+                             title="RPM vs Load Analysis", 
+                             labels={'RPM': 'Engine Speed', 'Load': 'Load %'})
+            st.plotly_chart(fig, use_container_width=True)
 
-    res_df = pd.DataFrame(results)
-    st.dataframe(res_df)
+        # 📋 جدول النتائج
+        st.subheader("🔍 Analysis Results")
+        st.dataframe(res_df)
+        
+        # 📥 تحميل
+        csv = res_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Download Report (CSV)", csv, "report_ai.csv", "text/csv")
 
-    # Statistiques
-    st.subheader("📈 Répartition par priorité")
-    c1, c2, c3 = st.columns(3)
-    
-    high_count = len(res_df[res_df['Sévérité_AI'] == 'High'])
-    medium_count = len(res_df[res_df['Sévérité_AI'] == 'Medium'])
-    low_count = len(res_df[res_df['Sévérité_AI'] == 'Low'])
-    
-    c1.metric("🔴 Élevée", high_count)
-    c2.metric("🟡 Moyenne", medium_count)
-    c3.metric("🟢 Faible", low_count)
-
-    # Download
-    csv_download = res_df.to_csv(index=False, encoding='utf-8-sig')
-    st.download_button(
-        label="📥 Télécharger le rapport AI (CSV)",
-        data=csv_download,
-        file_name="rapport_diagnostic_ai.csv",
-        mime="text/csv"
-    )
-    
-    # Résumé
-    st.subheader("📝 Résumé de l'analyse")
-    st.info(f"""
-    **Total des défauts analysés:** {len(res_df)}  
-    **Défauts critiques:** {high_count}  
-    **Recommandation:** {'Intervention immédiate requise!' if high_count > 0 else 'Planifier la maintenance'}
-    """)
+    else:
+        st.error(f"❌ Colonnes manquantes. Attendu: DTC_Code, RPM, Load_%, Temp_C")
+        st.code("Colonnes trouvées: " + ", ".join(df.columns))
 
 else:
-    st.info("📂 Téléchargez un fichier CSV pour commencer. Format attendu: `DTC_Code`, `RPM`, `Load_%`, `Temp_C`")
-    
-    st.markdown("""
-    ### 📝 Exemple de format CSV:
-    ```csv
-    DTC_Code,RPM,Load_%,Temp_C
-    P0171,800,15,90
-    P0300,2200,45,95
-    P0420,1500,35,105
-    ```
-    
-    ### 🔧 Comment exporter depuis YNS:
-    1. Effectuez un diagnostic complet
-    2. Allez dans "Rapport" ou "Export"
-    3. Choisissez "Exporter en CSV"
-    4. Téléchargez le fichier ici
-    """)
-    
-    st.markdown("""
-    ### 📱 Autres scanners compatibles:
-    - ✅ Autel MaxiSys
-    - ✅ ELM327 + Torque Pro
-    - ✅ Delphi DS150E
-    - ✅ Foxwell
-    - ✅ Tout scanner OBD-II standard
-    """)
+    st.info("⬅️ Commencez par uploader un fichier CSV dans le menu latéral.")
