@@ -55,7 +55,9 @@ TRANSLATIONS = {
         'footer': '© 2026 AutoDiag Pro - Diagnostic Automobile',
         'distribution': 'Répartition des défauts',
         'category': 'Catégorie',
-        'unknown_code': 'Code inconnu - Catégorie détectée'
+        'status': 'Statut',
+        'known': '✅ Connu',
+        'category_detected': 'ℹ️ Catégorie détectée'
     },
     'ar': {
         'title': '🚗 أوتو دياج برو - التشخيص الذكي',
@@ -96,19 +98,62 @@ TRANSLATIONS = {
         'footer': '© 2026 أوتو دياج برو - التشخيص الذكي للسيارات',
         'distribution': 'توزيع الأعطال',
         'category': 'الفئة',
-        'unknown_code': 'كود غير معروف - الفئة مكتشفة'
+        'status': 'الحالة',
+        'known': '✅ معروف',
+        'category_detected': 'ℹ️ الفئة مكتشفة'
     }
 }
 
-# Fonction SMART DTC - T3raf ay code!
+# ============================================================================
+# FONCTION 1: Validation des codes DTC (Filtre les codes valides uniquement)
+# ============================================================================
+def extract_valid_dtc(value):
+    """
+    Extrait un code DTC valide OBD-II
+    Retourne le code ou None
+    """
+    if not value:
+        return None
+    
+    value = str(value).strip().upper()
+    
+    # Pattern: P/B/C/U + 4 chiffres
+    match = re.search(r'\b(P|B|C|U)(\d{4})\b', value)
+    
+    if match:
+        return match.group(0)
+    
+    return None
+
+# ============================================================================
+# FONCTION 2: Nettoyage des valeurs numériques
+# ============================================================================
+def clean_numeric(val):
+    """
+    Nettoie les valeurs: "800 rpm" → 800.0
+    """
+    if val is None or str(val).lower() in ['none', 'nan', 'error', '--', '', 'n/a']:
+        return 0.0
+    
+    # Garder uniquement les chiffres et points
+    clean = re.sub(r'[^\d.]', '', str(val))
+    
+    try:
+        return float(clean) if clean else 0.0
+    except ValueError:
+        return 0.0
+
+# ============================================================================
+# FONCTION 3: Smart DTC Database (Tous les codes + catégories)
+# ============================================================================
 def get_dtc_info(dtc_code):
     """
     Analyse intelligente des codes DTC
-    Retourne: description, cause, solution, prix, categorie
+    Retourne: info_dict, is_known
     """
     dtc = dtc_code.strip().upper()
     
-    # Base de données spécifique (codes connus)
+    # Base de données spécifique
     specific_db = {
         'P0171': {
             'desc_fr': 'Système trop pauvre (Banque 1)',
@@ -192,13 +237,11 @@ def get_dtc_info(dtc_code):
         },
     }
     
-    # Ila l-code majoud f l-base
+    # Si code connu
     if dtc in specific_db:
         return specific_db[dtc], True
     
-    # Ila l-code MAJOUDCH - Smart Category Detection
-    # Hada howa l-system li kayfhem ay code!
-    
+    # Si code INCONNU → Détection par catégorie
     category_rules = {
         'P01': {
             'desc_fr': f'Problème injection/admission ({dtc})',
@@ -312,10 +355,10 @@ def get_dtc_info(dtc_code):
         },
     }
     
-    # Chercher la catégorie
+    # Chercher catégorie
     for prefix, info in category_rules.items():
         if dtc.startswith(prefix):
-            return info, False  # False = code inconnu mais catégorie trouvée
+            return info, False
     
     # Default
     return {
@@ -329,19 +372,9 @@ def get_dtc_info(dtc_code):
         'categorie': 'Inconnue'
     }, False
 
-# Fonction nettoyage données
-def clean_numeric(val):
-    """Nettoyer les valeurs numériques"""
-    if val is None or str(val).lower() in ['none', 'nan', 'error', '--', '']:
-        return 0.0
-    
-    clean = re.sub(r'[^\d.]', '', str(val))
-    try:
-        return float(clean) if clean else 0.0
-    except ValueError:
-        return 0.0
-
-# Entraînement modèle
+# ============================================================================
+# FONCTION 4: Entraînement modèle AI
+# ============================================================================
 @st.cache_resource
 def train_model():
     data = {
@@ -359,6 +392,10 @@ def train_model():
     model = RandomForestClassifier(n_estimators=50, max_depth=3, random_state=42)
     model.fit(X, y)
     return model, le
+
+# ============================================================================
+# INTERFACE STREAMLIT
+# ============================================================================
 
 # Sélecteur langue
 with st.sidebar:
@@ -431,12 +468,16 @@ with st.sidebar:
     st.subheader(t['search_dtc'])
     search = st.text_input(t['dtc_code'], placeholder=t['placeholder_dtc'])
     if search:
-        info, known = get_dtc_info(search)
-        lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
-        desc_key = f'desc_{lang_key}'
-        st.info(f"**{info[desc_key]}**\n\n💰 {info['prix']}\n\n📂 {info['categorie']}")
+        valid_search = extract_valid_dtc(search)
+        if valid_search:
+            info, known = get_dtc_info(valid_search)
+            lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
+            desc_key = f'desc_{lang_key}'
+            st.info(f"**{info[desc_key]}**\n\n💰 {info['prix']}\n\n📂 {info['categorie']}")
 
-# Main content
+# ============================================================================
+# TRAITEMENT CSV
+# ============================================================================
 if upload_method == t['csv'] and uploaded_file is not None:
     try:
         # Lecture fichier
@@ -454,7 +495,6 @@ if upload_method == t['csv'] and uploaded_file is not None:
         st.write(f"**{t['columns_detected']}**: {', '.join(df.columns)}")
         
         # Détection colonnes
-        col_map = {}
         dtc_col = rpm_col = load_col = temp_col = None
         
         for col in df.columns:
@@ -473,9 +513,20 @@ if upload_method == t['csv'] and uploaded_file is not None:
             dtc_col = st.selectbox(t['select_dtc_col'], df.columns.tolist())
         
         # Nettoyage données
-        df['RPM'] = df[rpm_col].apply(clean_numeric) if rpm_col else 0
-        df['Load'] = df[load_col].apply(clean_numeric) if load_col else 0
-        df['Temp'] = df[temp_col].apply(clean_numeric) if temp_col else 0
+        if rpm_col:
+            df['RPM'] = df[rpm_col].apply(clean_numeric)
+        else:
+            df['RPM'] = 0.0
+        
+        if load_col:
+            df['Load'] = df[load_col].apply(clean_numeric)
+        else:
+            df['Load'] = 0.0
+        
+        if temp_col:
+            df['Temp'] = df[temp_col].apply(clean_numeric)
+        else:
+            df['Temp'] = 0.0
         
         st.subheader(t['data_preview'])
         st.dataframe(df.head())
@@ -486,17 +537,32 @@ if upload_method == t['csv'] and uploaded_file is not None:
         lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
         
         for idx, row in df.iterrows():
-            dtc = str(row[dtc_col]).strip().upper()
-            match = re.search(r'P\d{4}|B\d{4}|C\d{4}|U\d{4}', dtc)
-            if match:
-                dtc = match.group()
+            # 1. Récupérer valeur brute
+            raw_value = str(row[dtc_col]).strip()
             
-            rpm = df['RPM'].iloc[idx] if isinstance(df['RPM'], pd.Series) else 0
-            load = df['Load'].iloc[idx] if isinstance(df['Load'], pd.Series) else 0
-            temp = df['Temp'].iloc[idx] if isinstance(df['Temp'], pd.Series) else 0
+            # 2. Ignorer valeurs vides
+            if not raw_value or len(raw_value) < 4:
+                continue
             
+            if raw_value.lower() in ['none', 'nan', 'null', '-', '', 'n/a']:
+                continue
+            
+            # 3. Extraire code DTC valide
+            dtc = extract_valid_dtc(raw_value)
+            
+            # 4. Si pas code valide → ignorer
+            if dtc is None:
+                continue
+            
+            # 5. Récupérer données
+            rpm = float(df['RPM'].iloc[idx])
+            load = float(df['Load'].iloc[idx])
+            temp = float(df['Temp'].iloc[idx])
+            
+            # 6. Obtenir informations DTC
             info, is_known = get_dtc_info(dtc)
             
+            # 7. Prédire sévérité
             try:
                 dtc_enc = le.transform([dtc])[0] if dtc in le.classes_ else 0
             except:
@@ -504,6 +570,7 @@ if upload_method == t['csv'] and uploaded_file is not None:
             
             severity = model.predict([[dtc_enc, rpm, load, temp]])[0]
             
+            # 8. Préparer résultat
             desc_key = f'desc_{lang_key}'
             cause_key = f'cause_{lang_key}'
             solution_key = f'solution_{lang_key}'
@@ -516,7 +583,7 @@ if upload_method == t['csv'] and uploaded_file is not None:
                 t['solution']: info[solution_key],
                 t['price']: info['prix'],
                 t['severity']: severity,
-                'Statut': '✅ Connu' if is_known else 'ℹ️ Catégorie'
+                t['status']: t['known'] if is_known else t['category_detected']
             })
         
         if not results:
@@ -548,11 +615,10 @@ if upload_method == t['csv'] and uploaded_file is not None:
         for idx, row in results_df.iterrows():
             sev = row[t['severity']]
             box_class = "error-box" if sev == 'High' else "warning-box" if sev == 'Medium' else "success-box"
-            statut_emoji = "✅" if row['Statut'] == '✅ Connu' else "ℹ️"
             
             st.markdown(f"""
             <div class="{box_class}">
-                <h4>🔧 {row[t['dtc_code']]} {statut_emoji} {row['Statut']}</h4>
+                <h4>🔧 {row[t['dtc_code']]} {row[t['status']]}</h4>
                 <p><strong>{t['category']}:</strong> {row[t['category']]}</p>
                 <p><strong>Description:</strong> {row['Description']}</p>
                 <p><strong>{t['severity']}:</strong> {sev} | <strong>{t['price']}:</strong> {row[t['price']]}</p>
@@ -569,44 +635,58 @@ if upload_method == t['csv'] and uploaded_file is not None:
         st.error(f"{t['error']} {str(e)}")
         st.exception(e)
 
+# ============================================================================
+# TRAITEMENT TEXTE/OCR
+# ============================================================================
 elif upload_method == t['text_ocr']:
     st.subheader("📸 Scanner/Copier-Coller")
     st.info(t['paste_text'])
     
-    text_input = st.text_area("", height=200, placeholder="Ex: P0171 - System Too Lean\nRPM: 800\nLoad: 15%")
+    text_input = st.text_area("", height=200, 
+                              placeholder="Ex: P0171 - System Too Lean\nRPM: 800\nLoad: 15%")
     
     if st.button(t['analyze']):
-        dtc_codes = re.findall(r'(P|B|C|U)\d{4}', text_input)
-        dtc_codes = [''.join(code) for code in dtc_codes]
+        # Extraire codes valides
+        dtc_matches = re.findall(r'\b(P|B|C|U)\d{4}\b', text_input)
+        dtc_codes = list(set([m[0] + text_input[text_input.find(m[0]+m[1]):text_input.find(m[0]+m[1])+5] 
+                              for m in dtc_matches]))
         
         if dtc_codes:
-            st.success(f"✅ {len(dtc_codes)} code(s) trouvé(s): {', '.join(set(dtc_codes))}")
+            st.success(f"✅ {len(dtc_codes)} code(s) trouvé(s): {', '.join(dtc_codes)}")
             
             results = []
             lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
             
-            for dtc in set(dtc_codes):
+            for dtc in dtc_codes:
                 info, is_known = get_dtc_info(dtc)
                 desc_key = f'desc_{lang_key}'
                 
                 results.append({
                     t['dtc_code']: dtc,
                     'Description': info[desc_key],
-                    'Statut': '✅ Connu' if is_known else 'ℹ️ Catégorie'
+                    t['status']: t['known'] if is_known else t['category_detected']
                 })
             
             st.dataframe(pd.DataFrame(results))
         else:
             st.warning("⚠️ Aucun code DTC trouvé")
 
+# ============================================================================
+# SAISIE MANUELLE
+# ============================================================================
 elif upload_method == t['manual']:
     if st.session_state.get('manual_dtc'):
         dtc = st.session_state.manual_dtc.upper()
-        info, is_known = get_dtc_info(dtc)
-        lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
-        desc_key = f'desc_{lang_key}'
+        valid_dtc = extract_valid_dtc(dtc)
         
-        st.info(f"**{dtc}** {info[desc_key]}\n\n💰 {info['prix']}\n\n📂 {info['categorie']}")
+        if valid_dtc:
+            info, is_known = get_dtc_info(valid_dtc)
+            lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
+            desc_key = f'desc_{lang_key}'
+            
+            st.info(f"**{valid_dtc}**\n\n{info[desc_key]}\n\n💰 {info['prix']}\n\n📂 {info['categorie']}")
+        else:
+            st.error("❌ Code DTC invalide")
 
 # Footer
 st.markdown("---")
