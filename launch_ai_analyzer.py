@@ -1,693 +1,613 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import LabelEncoder
-from datetime import datetime
-import re
+# Remplace la fonction get_dtc_info() b hadchi kamel:
 
-# Configuration
-st.set_page_config(page_title="AutoDiag Pro", layout="wide", page_icon="🚗")
-
-# Gestion langue
-if 'language' not in st.session_state:
-    st.session_state.language = 'fr'
-
-# Traductions
-TRANSLATIONS = {
-    'fr': {
-        'title': '🚗 AutoDiag Pro - Diagnostic Intelligent',
-        'sidebar_title': '⚙️ Options',
-        'import_data': '📁 Importer Données',
-        'method': 'Méthode:',
-        'csv': 'CSV',
-        'text_ocr': 'Texte/OCR',
-        'manual': 'Saisie Manuelle',
-        'choose_csv': 'Choisir fichier CSV',
-        'search_dtc': '🔍 Recherche DTC',
-        'dtc_code': 'Code DTC',
-        'placeholder_dtc': 'Ex: P0171',
-        'upload': 'Upload',
-        'paste_text': 'Coller le texte du scanner',
-        'analyze': 'Analyser',
-        'add': 'Ajouter',
-        'rpm': 'RPM',
-        'load': 'Load %',
-        'temp': 'Température °C',
-        'file_loaded': '✅ Fichier chargé avec succès!',
-        'columns_detected': 'Colonnes détectées:',
-        'dtc_col_not_found': 'Colonne DTC non trouvée!',
-        'select_dtc_col': 'Sélectionner colonne DTC',
-        'data_preview': '📊 Aperçu des données',
-        'analysis_results': '📊 Analyse des Résultats',
-        'high': '🔴 Élevée',
-        'medium': '🟡 Moyenne',
-        'low': '🟢 Faible',
-        'details': '🔧 Détails des défauts',
-        'severity': 'Sévérité',
-        'price': 'Prix estimé',
-        'cause': 'Cause probable',
-        'solution': 'Solution',
-        'download': '📥 Télécharger Rapport',
-        'no_dtc_found': '⚠️ Aucun code DTC reconnu',
-        'error': '❌ Erreur:',
-        'footer': '© 2026 AutoDiag Pro - Diagnostic Automobile',
-        'distribution': 'Répartition des défauts',
-        'category': 'Catégorie',
-        'status': 'Statut',
-        'known': '✅ Connu',
-        'category_detected': 'ℹ️ Catégorie détectée'
-    },
-    'ar': {
-        'title': '🚗 أوتو دياج برو - التشخيص الذكي',
-        'sidebar_title': '⚙️ الخيارات',
-        'import_data': '📁 استيراد البيانات',
-        'method': 'الطريقة:',
-        'csv': 'CSV',
-        'text_ocr': 'نص/مسح ضوئي',
-        'manual': 'إدخال يدوي',
-        'choose_csv': 'اختر ملف CSV',
-        'search_dtc': '🔍 البحث عن عطل',
-        'dtc_code': 'كود العطل',
-        'placeholder_dtc': 'مثال: P0171',
-        'upload': 'رفع',
-        'paste_text': 'الصق النص من جهاز الفحص',
-        'analyze': 'تحليل',
-        'add': 'إضافة',
-        'rpm': 'دورة المحرك',
-        'load': 'الحمل %',
-        'temp': 'درجة الحرارة °C',
-        'file_loaded': '✅ تم تحميل الملف بنجاح!',
-        'columns_detected': 'الأعمدة المكتشفة:',
-        'dtc_col_not_found': 'لم يتم العثور على عمود DTC!',
-        'select_dtc_col': 'اختر عمود DTC',
-        'data_preview': '📊 معاينة البيانات',
-        'analysis_results': '📊 تحليل النتائج',
-        'high': '🔴 عالي',
-        'medium': '🟡 متوسط',
-        'low': '🟢 منخفض',
-        'details': '🔧 تفاصيل الأعطال',
-        'severity': 'الخطورة',
-        'price': 'السعر المقدر',
-        'cause': 'السبب المحتمل',
-        'solution': 'الحل',
-        'download': '📥 تحميل التقرير',
-        'no_dtc_found': '⚠️ لم يتم العثور على أي عطل',
-        'error': '❌ خطأ:',
-        'footer': '© 2026 أوتو دياج برو - التشخيص الذكي للسيارات',
-        'distribution': 'توزيع الأعطال',
-        'category': 'الفئة',
-        'status': 'الحالة',
-        'known': '✅ معروف',
-        'category_detected': 'ℹ️ الفئة مكتشفة'
-    }
-}
-
-# ============================================================================
-# FONCTION 1: Validation des codes DTC (Filtre les codes valides uniquement)
-# ============================================================================
-def extract_valid_dtc(value):
-    """
-    Extrait un code DTC valide OBD-II
-    Retourne le code ou None
-    """
-    if not value:
-        return None
-    
-    value = str(value).strip().upper()
-    
-    # Pattern: P/B/C/U + 4 chiffres
-    match = re.search(r'\b(P|B|C|U)(\d{4})\b', value)
-    
-    if match:
-        return match.group(0)
-    
-    return None
-
-# ============================================================================
-# FONCTION 2: Nettoyage des valeurs numériques
-# ============================================================================
-def clean_numeric(val):
-    """
-    Nettoie les valeurs: "800 rpm" → 800.0
-    """
-    if val is None or str(val).lower() in ['none', 'nan', 'error', '--', '', 'n/a']:
-        return 0.0
-    
-    # Garder uniquement les chiffres et points
-    clean = re.sub(r'[^\d.]', '', str(val))
-    
-    try:
-        return float(clean) if clean else 0.0
-    except ValueError:
-        return 0.0
-
-# ============================================================================
-# FONCTION 3: Smart DTC Database (Tous les codes + catégories)
-# ============================================================================
 def get_dtc_info(dtc_code):
-    """
-    Analyse intelligente des codes DTC
-    Retourne: info_dict, is_known
-    """
     dtc = dtc_code.strip().upper()
     
-    # Base de données spécifique
-    specific_db = {
-        'P0171': {
-            'desc_fr': 'Système trop pauvre (Banque 1)',
-            'desc_ar': 'نظام الوقود فقير جداً (بنك 1)',
-            'cause_fr': 'Fuite d\'air, MAF défectueux, capteur O2',
-            'cause_ar': 'تسريب هواء، حساس MAF، حساس O2',
-            'solution_fr': 'Vérifier fuites admission, nettoyer MAF, tester O2',
-            'solution_ar': 'تفقد تسريب الهواء، نظف MAF، افحص O2',
-            'prix': '50-300€',
-            'categorie': 'Injection'
-        },
-        'P0172': {
-            'desc_fr': 'Système trop riche (Banque 1)',
-            'desc_ar': 'نظام الوقود غني جداً (بنك 1)',
-            'cause_fr': 'MAF, injecteurs qui fuient, régulateur pression',
-            'cause_ar': 'حساس MAF، البخاخات، منظم الضغط',
-            'solution_fr': 'Tester MAF, vérifier injecteurs',
-            'solution_ar': 'افحص MAF، تفقد البخاخات',
-            'prix': '100-400€',
-            'categorie': 'Injection'
-        },
-        'P0300': {
-            'desc_fr': 'Ratés d\'allumage multiples',
-            'desc_ar': 'احتراق عشوائي متعدد',
-            'cause_fr': 'Bougies usées, bobines défectueuses',
-            'cause_ar': 'البوجيات تالفة، الكويلات معطوبة',
-            'solution_fr': 'Remplacer bougies, tester bobines',
-            'solution_ar': 'بدل البوجيات، افحص الكويلات',
-            'prix': '100-500€',
-            'categorie': 'Allumage'
-        },
-        'P0301': {
-            'desc_fr': 'Ratés cylindre 1',
-            'desc_ar': 'احتراق الأسطوانة 1',
-            'cause_fr': 'Bougie/bobine cylindre 1',
-            'cause_ar': 'بوجية/كويل الأسطوانة 1',
-            'solution_fr': 'Tester bougie et bobine cylindre 1',
-            'solution_ar': 'افحص بوجية وكويل الأسطوانة 1',
-            'prix': '80-350€',
-            'categorie': 'Allumage'
-        },
-        'P0420': {
-            'desc_fr': 'Efficacité catalyseur faible',
-            'desc_ar': 'كفاءة الكاتاليزر منخفضة',
-            'cause_fr': 'Catalyseur usé, capteurs O2',
-            'cause_ar': 'الكاتاليزر تالف، حساسات الأكسجين',
-            'solution_fr': 'Vérifier capteurs O2 avant/après',
-            'solution_ar': 'تفقد حساسات O2',
-            'prix': '200-1500€',
-            'categorie': 'Échappement'
-        },
-        'P0128': {
-            'desc_fr': 'Thermostat température basse',
-            'desc_ar': 'الترموستات حرارة منخفضة',
-            'cause_fr': 'Thermostat bloqué ouvert',
-            'cause_ar': 'الترموستات عالق في وضع المفتوح',
-            'solution_fr': 'Remplacer thermostat',
-            'solution_ar': 'استبدل الترموستات',
-            'prix': '50-150€',
-            'categorie': 'Refroidissement'
-        },
-        'P0101': {
-            'desc_fr': 'Capteur MAF - Plage/performance',
-            'desc_ar': 'حساس MAF - خارج النطاق',
-            'cause_fr': 'MAF sale, fuite admission',
-            'cause_ar': 'حساس MAF وسخ، تسريب هواء',
-            'solution_fr': 'Nettoyer MAF, vérifier fuites',
-            'solution_ar': 'نظف MAF، تفقد التسريبات',
-            'prix': '80-300€',
-            'categorie': 'Admission'
-        },
-        'P0442': {
-            'desc_fr': 'Petite fuite EVAP',
-            'desc_ar': 'تسريب صغير في نظام EVAP',
-            'cause_fr': 'Bouchon carburant mal serré',
-            'cause_ar': 'غطاء البنزين غير محكم',
-            'solution_fr': 'Serrer/remplacer bouchon',
-            'solution_ar': 'أحكم غطاء البنزين',
-            'prix': '30-200€',
-            'categorie': 'EVAP'
-        },
+    # ========================================================================
+    # BASE DE DONNÉES COMPLÈTE - POWERTRAIN (P0xxx)
+    # ========================================================================
+    powertrain_db = {
+        # Fuel & Air Metering (P01xx)
+        'P0100': {'desc_fr': 'Circuit capteur débit massique d\'air', 'desc_ar': 'دائرة حساس تدفق الهواء MAF', 'cause_fr': 'MAF, câblage, connecteur', 'cause_ar': 'حساس MAF، أسلاك، موصل', 'solution_fr': 'Tester/remplacer MAF', 'solution_ar': 'افحص أو بدل حساس MAF', 'prix': '80-300€', 'categorie': 'Admission'},
+        'P0101': {'desc_fr': 'Problème plage/performance MAF', 'desc_ar': 'مشكل في نطاق حساس MAF', 'cause_fr': 'MAF sale, fuite admission', 'cause_ar': 'حساس MAF وسخ، تسريب هواء', 'solution_fr': 'Nettoyer MAF, chercher fuites', 'solution_ar': 'نظف MAF، ابحث عن تسريب', 'prix': '80-300€', 'categorie': 'Admission'},
+        'P0102': {'desc_fr': 'Signal bas circuit MAF', 'desc_ar': 'إشارة منخفضة لحساس MAF', 'cause_fr': 'MAF défectueux, court-circuit', 'cause_ar': 'حساس MAF تالف، قصر في الدائرة', 'solution_fr': 'Tester MAF et câblage', 'solution_ar': 'افحص الحساس والأسلاك', 'prix': '80-250€', 'categorie': 'Admission'},
+        'P0103': {'desc_fr': 'Signal haut circuit MAF', 'desc_ar': 'إشارة عالية لحساس MAF', 'cause_fr': 'MAF HS, problème tension', 'cause_ar': 'حساس MAF معطوب، مشكل جهد', 'solution_fr': 'Remplacer MAF', 'solution_ar': 'استبدل الحساس', 'prix': '100-300€', 'categorie': 'Admission'},
+        'P0106': {'desc_fr': 'Problème plage/performance MAP', 'desc_ar': 'مشكل في حساس ضغط الهواء MAP', 'cause_fr': 'Capteur MAP, fuite vide', 'cause_ar': 'حساس MAP، تسريب فراغ', 'solution_fr': 'Tester MAP, vérifier fuites', 'solution_ar': 'افحص حساس MAP', 'prix': '70-250€', 'categorie': 'Admission'},
+        'P0107': {'desc_fr': 'Signal bas circuit MAP', 'desc_ar': 'إشارة منخفضة لحساس MAP', 'cause_fr': 'MAP défectueux', 'cause_ar': 'حساس MAP تالف', 'solution_fr': 'Remplacer capteur MAP', 'solution_ar': 'استبدل الحساس', 'prix': '70-200€', 'categorie': 'Admission'},
+        'P0108': {'desc_fr': 'Signal haut circuit MAP', 'desc_ar': 'إشارة عالية لحساس MAP', 'cause_fr': 'MAP HS, court-circuit', 'cause_ar': 'حساس MAP معطوب', 'solution_fr': 'Tester/remplacer MAP', 'solution_ar': 'افحص أو استبدل', 'prix': '70-200€', 'categorie': 'Admission'},
+        'P0110': {'desc_fr': 'Circuit capteur température air admission', 'desc_ar': 'دائرة حساس حرارة الهواء الداخل', 'cause_fr': 'IAT, câblage', 'cause_ar': 'حساس IAT، أسلاك', 'solution_fr': 'Tester capteur IAT', 'solution_ar': 'افحص الحساس', 'prix': '50-150€', 'categorie': 'Admission'},
+        'P0111': {'desc_fr': 'Problème plage IAT', 'desc_ar': 'مشكل في نطاق حساس IAT', 'cause_fr': 'IAT défectueux', 'cause_ar': 'حساس IAT تالف', 'solution_fr': 'Remplacer IAT', 'solution_ar': 'استبدل الحساس', 'prix': '50-150€', 'categorie': 'Admission'},
+        'P0112': {'desc_fr': 'Signal bas circuit IAT', 'desc_ar': 'إشارة منخفضة لحساس IAT', 'cause_fr': 'IAT HS, court-circuit', 'cause_ar': 'حساس IAT معطوب', 'solution_fr': 'Tester IAT', 'solution_ar': 'افحص الحساس', 'prix': '50-150€', 'categorie': 'Admission'},
+        'P0113': {'desc_fr': 'Signal haut circuit IAT', 'desc_ar': 'إشارة عالية لحساس IAT', 'cause_fr': 'IAT défectueux', 'cause_ar': 'حساس IAT تالف', 'solution_fr': 'Remplacer IAT', 'solution_ar': 'استبدل الحساس', 'prix': '50-150€', 'categorie': 'Admission'},
+        'P0115': {'desc_fr': 'Circuit capteur température liquide refroidissement', 'desc_ar': 'دائرة حساس حرارة سائل التبريد', 'cause_fr': 'Capteur ECT, câblage', 'cause_ar': 'حساس حرارة المحرك، أسلاك', 'solution_fr': 'Tester capteur ECT', 'solution_ar': 'افحص حساس الحرارة', 'prix': '50-200€', 'categorie': 'Refroidissement'},
+        'P0116': {'desc_fr': 'Problème plage ECT', 'desc_ar': 'مشكل في نطاق حساس ECT', 'cause_fr': 'Capteur ECT, thermostat', 'cause_ar': 'حساس ECT، ترموستات', 'solution_fr': 'Tester ECT et thermostat', 'solution_ar': 'افحص الحساس والثرموستات', 'prix': '50-200€', 'categorie': 'Refroidissement'},
+        'P0117': {'desc_fr': 'Signal bas circuit ECT', 'desc_ar': 'إشارة منخفضة لحساس ECT', 'cause_fr': 'ECT défectueux', 'cause_ar': 'حساس ECT تالف', 'solution_fr': 'Remplacer capteur ECT', 'solution_ar': 'استبدل الحساس', 'prix': '50-150€', 'categorie': 'Refroidissement'},
+        'P0118': {'desc_fr': 'Signal haut circuit ECT', 'desc_ar': 'إشارة عالية لحساس ECT', 'cause_fr': 'ECT HS, circuit ouvert', 'cause_ar': 'حساس ECT معطوب', 'solution_fr': 'Tester ECT', 'solution_ar': 'افحص الحساس', 'prix': '50-150€', 'categorie': 'Refroidissement'},
+        'P0120': {'desc_fr': 'Circuit capteur position papillon', 'desc_ar': 'دائرة حساس وضعية صمام الخانق', 'cause_fr': 'TPS, câblage', 'cause_ar': 'حساس TPS، أسلاك', 'solution_fr': 'Tester capteur TPS', 'solution_ar': 'افحص حساس الصمام', 'prix': '80-300€', 'categorie': 'Injection'},
+        'P0121': {'desc_fr': 'Problème plage TPS', 'desc_ar': 'مشكل في نطاق حساس TPS', 'cause_fr': 'TPS défectueux', 'cause_ar': 'حساس TPS تالف', 'solution_fr': 'Calibrer/remplacer TPS', 'solution_ar': 'عاير أو استبدل الحساس', 'prix': '80-300€', 'categorie': 'Injection'},
+        'P0122': {'desc_fr': 'Signal bas circuit TPS', 'desc_ar': 'إشارة منخفضة لحساس TPS', 'cause_fr': 'TPS HS', 'cause_ar': 'حساس TPS معطوب', 'solution_fr': 'Remplacer TPS', 'solution_ar': 'استبدل الحساس', 'prix': '80-250€', 'categorie': 'Injection'},
+        'P0123': {'desc_fr': 'Signal haut circuit TPS', 'desc_ar': 'إشارة عالية لحساس TPS', 'cause_fr': 'TPS défectueux', 'cause_ar': 'حساس TPS تالف', 'solution_fr': 'Remplacer TPS', 'solution_ar': 'استبدل الحساس', 'prix': '80-250€', 'categorie': 'Injection'},
+        'P0125': {'desc_fr': 'Température liquide insuffisante pour boucle fermée', 'desc_ar': 'حرارة سائل التبريد غير كافية', 'cause_fr': 'Thermostat bloqué ouvert', 'cause_ar': 'الترموستات عالق مفتوح', 'solution_fr': 'Remplacer thermostat', 'solution_ar': 'استبدل الترموستات', 'prix': '50-150€', 'categorie': 'Refroidissement'},
+        'P0128': {'desc_fr': 'Thermostat température basse', 'desc_ar': 'الترموستات حرارة منخفضة', 'cause_fr': 'Thermostat ouvert', 'cause_ar': 'الترموستات مفتوح', 'solution_fr': 'Remplacer thermostat', 'solution_ar': 'استبدل الترموستات', 'prix': '50-150€', 'categorie': 'Refroidissement'},
+        'P0130': {'desc_fr': 'Circuit capteur O2 banque 1 capteur 1', 'desc_ar': 'دائرة حساس الأكسجين بنك 1', 'cause_fr': 'Sonde lambda, câblage', 'cause_ar': 'حساس الأكسجين، أسلاك', 'solution_fr': 'Tester sonde O2', 'solution_ar': 'افحص حساس الأكسجين', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0131': {'desc_fr': 'Signal bas capteur O2 banque 1 capteur 1', 'desc_ar': 'إشارة منخفضة لحساس O2', 'cause_fr': 'Sonde O2 défectueuse', 'cause_ar': 'حساس O2 تالف', 'solution_fr': 'Remplacer sonde O2', 'solution_ar': 'استبدل حساس الأكسجين', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0132': {'desc_fr': 'Signal haut capteur O2 banque 1', 'desc_ar': 'إشارة عالية لحساس O2', 'cause_fr': 'Sonde O2 HS', 'cause_ar': 'حساس O2 معطوب', 'solution_fr': 'Tester sonde O2', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0133': {'desc_fr': 'Réponse lente capteur O2 banque 1', 'desc_ar': 'استجابة بطيئة لحساس O2', 'cause_fr': 'Sonde O2 usée', 'cause_ar': 'حساس O2 مستهلك', 'solution_fr': 'Remplacer sonde O2', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0134': {'desc_fr': 'Aucune activité capteur O2 banque 1', 'desc_ar': 'لا يوجد نشاط لحساس O2', 'cause_fr': 'Sonde O2 morte, fusible', 'cause_ar': 'حساس O2 ميت، فيوز', 'solution_fr': 'Tester sonde et fusible', 'solution_ar': 'افحص الحساس والفيوز', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0135': {'desc_fr': 'Problème chauffage sonde O2 banque 1 capteur 1', 'desc_ar': 'مشكل في سخان حساس O2', 'cause_fr': 'Résistance chauffage O2', 'cause_ar': 'مقاومة التسخين', 'solution_fr': 'Tester chauffage sonde', 'solution_ar': 'افحص دائرة التسخين', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0136': {'desc_fr': 'Circuit capteur O2 banque 1 capteur 2', 'desc_ar': 'دائرة حساس O2 الثاني', 'cause_fr': 'Sonde O2 aval, câblage', 'cause_ar': 'حساس O2 الخلفي، أسلاك', 'solution_fr': 'Tester sonde O2 aval', 'solution_ar': 'افحص الحساس الخلفي', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0137': {'desc_fr': 'Signal bas capteur O2 banque 1 capteur 2', 'desc_ar': 'إشارة منخفضة للحساس الثاني', 'cause_fr': 'Sonde O2 aval HS', 'cause_ar': 'حساس O2 الخلفي تالف', 'solution_fr': 'Remplacer sonde aval', 'solution_ar': 'استبدل الحساس الخلفي', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0138': {'desc_fr': 'Signal haut capteur O2 banque 1 capteur 2', 'desc_ar': 'إشارة عالية للحساس الثاني', 'cause_fr': 'Sonde O2 aval défectueuse', 'cause_ar': 'حساس O2 الخلفي تالف', 'solution_fr': 'Tester sonde aval', 'solution_ar': 'افحص الحساس الخلفي', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0140': {'desc_fr': 'Aucune activité capteur O2 banque 1 capteur 2', 'desc_ar': 'لا يوجد نشاط للحساس الثاني', 'cause_fr': 'Sonde O2 aval morte', 'cause_ar': 'حساس O2 الخلفي ميت', 'solution_fr': 'Remplacer sonde aval', 'solution_ar': 'استبدل الحساس الخلفي', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0141': {'desc_fr': 'Problème chauffage sonde O2 banque 1 capteur 2', 'desc_ar': 'مشكل في سخان الحساس الثاني', 'cause_fr': 'Chauffage sonde aval', 'cause_ar': 'سخان الحساس الخلفي', 'solution_fr': 'Tester chauffage aval', 'solution_ar': 'افحص سخان الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0150': {'desc_fr': 'Circuit capteur O2 banque 2 capteur 1', 'desc_ar': 'دائرة حساس O2 بنك 2', 'cause_fr': 'Sonde O2 banque 2', 'cause_ar': 'حساس O2 البنك الثاني', 'solution_fr': 'Tester sonde banque 2', 'solution_ar': 'افحص حساس البنك 2', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0151': {'desc_fr': 'Signal bas capteur O2 banque 2 capteur 1', 'desc_ar': 'إشارة منخفضة لحساس بنك 2', 'cause_fr': 'Sonde O2 banque 2 HS', 'cause_ar': 'حساس بنك 2 تالف', 'solution_fr': 'Remplacer sonde banque 2', 'solution_ar': 'استبدل حساس البنك 2', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0152': {'desc_fr': 'Signal haut capteur O2 banque 2', 'desc_ar': 'إشارة عالية لحساس بنك 2', 'cause_fr': 'Sonde O2 banque 2 défectueuse', 'cause_ar': 'حساس بنك 2 تالف', 'solution_fr': 'Tester sonde banque 2', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0153': {'desc_fr': 'Réponse lente capteur O2 banque 2', 'desc_ar': 'استجابة بطيئة لحساس بنك 2', 'cause_fr': 'Sonde O2 banque 2 usée', 'cause_ar': 'حساس بنك 2 مستهلك', 'solution_fr': 'Remplacer sonde', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0154': {'desc_fr': 'Aucune activité capteur O2 banque 2', 'desc_ar': 'لا يوجد نشاط لحساس بنك 2', 'cause_fr': 'Sonde O2 banque 2 morte', 'cause_ar': 'حساس بنك 2 ميت', 'solution_fr': 'Remplacer sonde', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0155': {'desc_fr': 'Problème chauffage sonde O2 banque 2', 'desc_ar': 'مشكل في سخان حساس بنك 2', 'cause_fr': 'Chauffage sonde banque 2', 'cause_ar': 'سخان حساس البنك 2', 'solution_fr': 'Tester chauffage', 'solution_ar': 'افحص السخان', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0160': {'desc_fr': 'Aucune activité capteur O2 banque 2 capteur 2', 'desc_ar': 'لا يوجد نشاط للحساس الثاني بنك 2', 'cause_fr': 'Sonde O2 banque 2 aval', 'cause_ar': 'حساس O2 الخلفي بنك 2', 'solution_fr': 'Tester sonde aval B2', 'solution_ar': 'افحص الحساس الخلفي', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0161': {'desc_fr': 'Problème chauffage sonde O2 banque 2 capteur 2', 'desc_ar': 'مشكل في سخان الحساس الثاني بنك 2', 'cause_fr': 'Chauffage sonde aval B2', 'cause_ar': 'سخان الحساس الخلفي', 'solution_fr': 'Tester chauffage', 'solution_ar': 'افحص السخان', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0170': {'desc_fr': 'Réglage carburant banque 1', 'desc_ar': 'ضبط الوقود بنك 1', 'cause_fr': 'Problème mélange air/carburant', 'cause_ar': 'مشكل في خليط الهواء/الوقود', 'solution_fr': 'Vérifier injection, fuites', 'solution_ar': 'تفقد الحقن والتسريبات', 'prix': '80-400€', 'categorie': 'Injection'},
+        'P0171': {'desc_fr': 'Système trop pauvre banque 1', 'desc_ar': 'نظام الوقود فقير جداً بنك 1', 'cause_fr': 'Fuite vide, MAF, O2, injecteurs', 'cause_ar': 'تسريب هواء، MAF، O2، بخاخات', 'solution_fr': 'Chercher fuites, tester MAF/O2', 'solution_ar': 'ابحث عن تسريب، افحص MAF', 'prix': '50-300€', 'categorie': 'Injection'},
+        'P0172': {'desc_fr': 'Système trop riche banque 1', 'desc_ar': 'نظام الوقود غني جداً بنك 1', 'cause_fr': 'MAF, injecteurs, régulateur pression', 'cause_ar': 'MAF، بخاخات، منظم الضغط', 'solution_fr': 'Tester MAF, injecteurs', 'solution_ar': 'افحص MAF والبخاخات', 'prix': '100-400€', 'categorie': 'Injection'},
+        'P0174': {'desc_fr': 'Système trop pauvre banque 2', 'desc_ar': 'نظام الوقود فقير جداً بنك 2', 'cause_fr': 'Fuite vide, MAF, O2 banque 2', 'cause_ar': 'تسريب هواء، MAF، O2 بنك 2', 'solution_fr': 'Chercher fuites banque 2', 'solution_ar': 'ابحث عن تسريب في بنك 2', 'prix': '50-300€', 'categorie': 'Injection'},
+        'P0175': {'desc_fr': 'Système trop riche banque 2', 'desc_ar': 'نظام الوقود غني جداً بنك 2', 'cause_fr': 'MAF, injecteurs banque 2', 'cause_ar': 'MAF، بخاخات بنك 2', 'solution_fr': 'Tester injection banque 2', 'solution_ar': 'افحق الحقن في بنك 2', 'prix': '100-400€', 'categorie': 'Injection'},
+        'P0180': {'desc_fr': 'Circuit capteur température carburant A', 'desc_ar': 'دائرة حساس حرارة الوقود A', 'cause_fr': 'Capteur température carburant', 'cause_ar': 'حساس حرارة الوقود', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '50-200€', 'categorie': 'Injection'},
+        'P0181': {'desc_fr': 'Problème plage capteur température carburant A', 'desc_ar': 'مشكل في نطاق حساس حرارة الوقود', 'cause_fr': 'Capteur défectueux', 'cause_ar': 'حساس تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '50-200€', 'categorie': 'Injection'},
+        'P0182': {'desc_fr': 'Signal bas capteur température carburant A', 'desc_ar': 'إشارة منخفضة لحساس حرارة الوقود', 'cause_fr': 'Capteur HS', 'cause_ar': 'حساس معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '50-150€', 'categorie': 'Injection'},
+        'P0183': {'desc_fr': 'Signal haut capteur température carburant A', 'desc_ar': 'إشارة عالية لحساس حرارة الوقود', 'cause_fr': 'Capteur défectueux', 'cause_ar': 'حساس تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '50-150€', 'categorie': 'Injection'},
+        
+        # Ignition System (P03xx)
+        'P0300': {'desc_fr': 'Ratés d\'allumage multiples/aléatoires', 'desc_ar': 'احتراق عشوائي متعدد', 'cause_fr': 'Bougies, bobines, injecteurs, compression', 'cause_ar': 'البوجيات، الكويلات، البخاخات، الكومبراس', 'solution_fr': 'Tester bougies, bobines, compression', 'solution_ar': 'افحص البوجيات والكويلات والكومبراس', 'prix': '100-500€', 'categorie': 'Allumage'},
+        'P0301': {'desc_fr': 'Ratés d\'allumage cylindre 1', 'desc_ar': 'احتراق الأسطوانة 1', 'cause_fr': 'Bougie cylindre 1, bobine 1, injecteur 1', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 1', 'solution_fr': 'Tester bougie, bobine cylindre 1', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 1', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0302': {'desc_fr': 'Ratés d\'allumage cylindre 2', 'desc_ar': 'احتراق الأسطوانة 2', 'cause_fr': 'Bougie cylindre 2, bobine 2, injecteur 2', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 2', 'solution_fr': 'Tester bougie, bobine cylindre 2', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 2', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0303': {'desc_fr': 'Ratés d\'allumage cylindre 3', 'desc_ar': 'احتراق الأسطوانة 3', 'cause_fr': 'Bougie cylindre 3, bobine 3, injecteur 3', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 3', 'solution_fr': 'Tester bougie, bobine cylindre 3', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 3', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0304': {'desc_fr': 'Ratés d\'allumage cylindre 4', 'desc_ar': 'احتراق الأسطوانة 4', 'cause_fr': 'Bougie cylindre 4, bobine 4, injecteur 4', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 4', 'solution_fr': 'Tester bougie, bobine cylindre 4', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 4', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0305': {'desc_fr': 'Ratés d\'allumage cylindre 5', 'desc_ar': 'احتراق الأسطوانة 5', 'cause_fr': 'Bougie cylindre 5, bobine 5, injecteur 5', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 5', 'solution_fr': 'Tester bougie, bobine cylindre 5', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 5', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0306': {'desc_fr': 'Ratés d\'allumage cylindre 6', 'desc_ar': 'احتراق الأسطوانة 6', 'cause_fr': 'Bougie cylindre 6, bobine 6, injecteur 6', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 6', 'solution_fr': 'Tester bougie, bobine cylindre 6', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 6', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0307': {'desc_fr': 'Ratés d\'allumage cylindre 7', 'desc_ar': 'احتراق الأسطوانة 7', 'cause_fr': 'Bougie cylindre 7, bobine 7, injecteur 7', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 7', 'solution_fr': 'Tester bougie, bobine cylindre 7', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 7', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0308': {'desc_fr': 'Ratés d\'allumage cylindre 8', 'desc_ar': 'احتراق الأسطوانة 8', 'cause_fr': 'Bougie cylindre 8, bobine 8, injecteur 8', 'cause_ar': 'بوجية/كويل/بخاخ الأسطوانة 8', 'solution_fr': 'Tester bougie, bobine cylindre 8', 'solution_ar': 'افحص بوجية وكويل الأسطوانة 8', 'prix': '80-350€', 'categorie': 'Allumage'},
+        'P0320': {'desc_fr': 'Circuit capteur régime moteur', 'desc_ar': 'دائرة حساس سرعة المحرك', 'cause_fr': 'Capteur PMH, câblage', 'cause_ar': 'حساس النقطة الميتة، أسلاك', 'solution_fr': 'Tester capteur PMH', 'solution_ar': 'افحص حساس السرعة', 'prix': '80-300€', 'categorie': 'Allumage'},
+        'P0325': {'desc_fr': 'Circuit capteur détonation banque 1', 'desc_ar': 'دائرة حساس الخبط بنك 1', 'cause_fr': 'Capteur cliquetis, câblage', 'cause_ar': 'حساس الخبط، أسلاك', 'solution_fr': 'Tester capteur cliquetis', 'solution_ar': 'افحص حساس الخبط', 'prix': '100-350€', 'categorie': 'Allumage'},
+        'P0326': {'desc_fr': 'Problème plage capteur détonation banque 1', 'desc_ar': 'مشكل في نطاق حساس الخبط', 'cause_fr': 'Capteur cliquetis défectueux', 'cause_ar': 'حساس الخبط تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Allumage'},
+        'P0327': {'desc_fr': 'Signal bas capteur détonation banque 1', 'desc_ar': 'إشارة منخفضة لحساس الخبط', 'cause_fr': 'Capteur cliquetis HS', 'cause_ar': 'حساس الخبط معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-300€', 'categorie': 'Allumage'},
+        'P0328': {'desc_fr': 'Signal haut capteur détonation banque 1', 'desc_ar': 'إشارة عالية لحساس الخبط', 'cause_fr': 'Capteur cliquetis défectueux', 'cause_ar': 'حساس الخبط تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-300€', 'categorie': 'Allumage'},
+        'P0330': {'desc_fr': 'Circuit capteur détonation banque 2', 'desc_ar': 'دائرة حساس الخبط بنك 2', 'cause_fr': 'Capteur cliquetis banque 2', 'cause_ar': 'حساس الخبط بنك 2', 'solution_fr': 'Tester capteur banque 2', 'solution_ar': 'افحص حساس البنك 2', 'prix': '100-350€', 'categorie': 'Allumage'},
+        'P0335': {'desc_fr': 'Circuit capteur position vilebrequin', 'desc_ar': 'دائرة حساس وضعية العمود المرفقي', 'cause_fr': 'Capteur vilebrequin, câblage', 'cause_ar': 'حساس الكرنك، أسلاك', 'solution_fr': 'Tester capteur vilebrequin', 'solution_ar': 'افحص حساس الكرنك', 'prix': '100-400€', 'categorie': 'Allumage'},
+        'P0336': {'desc_fr': 'Problème plage capteur vilebrequin', 'desc_ar': 'مشكل في نطاق حساس الكرنك', 'cause_fr': 'Capteur vilebrequin défectueux', 'cause_ar': 'حساس الكرنك تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Allumage'},
+        'P0340': {'desc_fr': 'Circuit capteur position arbre à cames', 'desc_ar': 'دائرة حساس وضعية عمود الكامات', 'cause_fr': 'Capteur AAC, câblage', 'cause_ar': 'حساس الكامات، أسلاك', 'solution_fr': 'Tester capteur arbre à cames', 'solution_ar': 'افحص حساس الكامات', 'prix': '100-400€', 'categorie': 'Allumage'},
+        'P0341': {'desc_fr': 'Problème plage capteur arbre à cames', 'desc_ar': 'مشكل في نطاق حساس الكامات', 'cause_fr': 'Capteur AAC défectueux', 'cause_ar': 'حساس الكامات تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Allumage'},
+        'P0342': {'desc_fr': 'Signal bas capteur arbre à cames', 'desc_ar': 'إشارة منخفضة لحساس الكامات', 'cause_fr': 'Capteur AAC HS', 'cause_ar': 'حساس الكامات معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Allumage'},
+        'P0343': {'desc_fr': 'Signal haut capteur arbre à cames', 'desc_ar': 'إشارة عالية لحساس الكامات', 'cause_fr': 'Capteur AAC défectueux', 'cause_ar': 'حساس الكامات تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Allumage'},
+        
+        # Emission Control (P04xx)
+        'P0400': {'desc_fr': 'Circuit recirculation gaz échappement', 'desc_ar': 'دائرة إعادة تدوير غاز العادم EGR', 'cause_fr': 'Vanne EGR, câblage', 'cause_ar': 'صمام EGR، أسلاك', 'solution_fr': 'Tester vanne EGR', 'solution_ar': 'افحص صمام EGR', 'prix': '150-500€', 'categorie': 'Antipollution'},
+        'P0401': {'desc_fr': 'Débit insuffisant EGR', 'desc_ar': 'تدفق غير كافٍ لنظام EGR', 'cause_fr': 'Vanne EGR bouchée', 'cause_ar': 'صمام EGR مسدود', 'solution_fr': 'Nettoyer/remplacer EGR', 'solution_ar': 'نظف أو استبدل صمام EGR', 'prix': '150-500€', 'categorie': 'Antipollution'},
+        'P0402': {'desc_fr': 'Débit excessif EGR', 'desc_ar': 'تدفق مفرط لنظام EGR', 'cause_fr': 'Vanne EGR bloquée ouverte', 'cause_ar': 'صمام EGR عالق مفتوح', 'solution_fr': 'Tester vanne EGR', 'solution_ar': 'افحص صمام EGR', 'prix': '150-500€', 'categorie': 'Antipollution'},
+        'P0403': {'desc_fr': 'Circuit commande vanne EGR', 'desc_ar': 'دائرة تحكم صمام EGR', 'cause_fr': 'Solenoïde EGR, câblage', 'cause_ar': 'ملف EGR، أسلاك', 'solution_fr': 'Tester solenoïde EGR', 'solution_ar': 'افحص ملف الصمام', 'prix': '150-450€', 'categorie': 'Antipollution'},
+        'P0404': {'desc_fr': 'Problème plage circuit EGR', 'desc_ar': 'مشكل في نطاق دائرة EGR', 'cause_fr': 'Capteur position EGR', 'cause_ar': 'حساس وضعية EGR', 'solution_fr': 'Tester capteur EGR', 'solution_ar': 'افحص حساس الصمام', 'prix': '150-450€', 'categorie': 'Antipollution'},
+        'P0405': {'desc_fr': 'Signal bas capteur position EGR', 'desc_ar': 'إشارة منخفضة لحساس وضعية EGR', 'cause_fr': 'Capteur EGR défectueux', 'cause_ar': 'حساس EGR تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '150-400€', 'categorie': 'Antipollution'},
+        'P0406': {'desc_fr': 'Signal haut capteur position EGR', 'desc_ar': 'إشارة عالية لحساس وضعية EGR', 'cause_fr': 'Capteur EGR HS', 'cause_ar': 'حساس EGR معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '150-400€', 'categorie': 'Antipollution'},
+        'P0410': {'desc_fr': 'Circuit air secondaire', 'desc_ar': 'دائرة الهواء الثانوي', 'cause_fr': 'Pompe air secondaire, relais', 'cause_ar': 'مضخة الهواء الثانوي، مرحل', 'solution_fr': 'Tester pompe air', 'solution_ar': 'افحص المضخة', 'prix': '200-600€', 'categorie': 'Antipollution'},
+        'P0411': {'desc_fr': 'Débit air secondaire incorrect', 'desc_ar': 'تدفق الهواء الثانوي غير صحيح', 'cause_fr': 'Pompe air secondaire HS', 'cause_ar': 'مضخة الهواء الثانوي معطوبة', 'solution_fr': 'Tester pompe', 'solution_ar': 'افحص المضخة', 'prix': '200-600€', 'categorie': 'Antipollution'},
+        'P0420': {'desc_fr': 'Efficacité catalyseur banque 1 inférieure au seuil', 'desc_ar': 'كفاءة الكاتاليزر بنك 1 أقل من الحد المطلوب', 'cause_fr': 'Catalyseur usé, sonde O2', 'cause_ar': 'الكاتاليزر مستهلك، حساس O2', 'solution_fr': 'Tester catalyseur et sondes O2', 'solution_ar': 'افحص الكاتاليزر وحساسات الأكسجين', 'prix': '200-1500€', 'categorie': 'Échappement'},
+        'P0430': {'desc_fr': 'Efficacité catalyseur banque 2 inférieure au seuil', 'desc_ar': 'كفاءة الكاتاليزر بنك 2 أقل من الحد المطلوب', 'cause_fr': 'Catalyseur banque 2 usé', 'cause_ar': 'الكاتاليزر بنك 2 مستهلك', 'solution_fr': 'Tester catalyseur banque 2', 'solution_ar': 'افحص الكاتاليزر البنك 2', 'prix': '200-1500€', 'categorie': 'Échappement'},
+        'P0440': {'desc_fr': 'Circuit système EVAP', 'desc_ar': 'دائرة نظام EVAP', 'cause_fr': 'Système EVAP, vanne purge', 'cause_ar': 'نظام EVAP، صمام التنقية', 'solution_fr': 'Tester système EVAP', 'solution_ar': 'افحص نظام EVAP', 'prix': '100-400€', 'categorie': 'EVAP'},
+        'P0441': {'desc_fr': 'Débit incorrect système EVAP', 'desc_ar': 'تدفق غير صحيح لنظام EVAP', 'cause_fr': 'Vanne purge EVAP', 'cause_ar': 'صمام تنقية EVAP', 'solution_fr': 'Tester vanne purge', 'solution_ar': 'افحص صمام التنقية', 'prix': '100-350€', 'categorie': 'EVAP'},
+        'P0442': {'desc_fr': 'Petite fuite détectée système EVAP', 'desc_ar': 'تسريب صغير في نظام EVAP', 'cause_fr': 'Bouchon carburant, fuite EVAP', 'cause_ar': 'غطاء البنزين، تسريب في EVAP', 'solution_fr': 'Serrer bouchon, tester EVAP', 'solution_ar': 'أحكم الغطاء، افحص النظام', 'prix': '30-200€', 'categorie': 'EVAP'},
+        'P0443': {'desc_fr': 'Circuit commande vanne purge EVAP', 'desc_ar': 'دائرة تحكم صمام تنقية EVAP', 'cause_fr': 'Solenoïde purge, câblage', 'cause_ar': 'ملف التنقية، أسلاك', 'solution_fr': 'Tester solenoïde purge', 'solution_ar': 'افحص ملف الصمام', 'prix': '80-300€', 'categorie': 'EVAP'},
+        'P0444': {'desc_fr': 'Circuit ouvert vanne purge EVAP', 'desc_ar': 'دائرة مفتوحة لصمام التنقية', 'cause_fr': 'Solenoïde purge HS', 'cause_ar': 'ملف التنقية معطوب', 'solution_fr': 'Tester vanne purge', 'solution_ar': 'افحص الصمام', 'prix': '80-300€', 'categorie': 'EVAP'},
+        'P0445': {'desc_fr': 'Court-circuit vanne purge EVAP', 'desc_ar': 'دائرة مقصورة لصمام التنقية', 'cause_fr': 'Solenoïde purge court-circuit', 'cause_ar': 'ملف التنقية مقصور', 'solution_fr': 'Remplacer vanne purge', 'solution_ar': 'استبدل الصمام', 'prix': '80-300€', 'categorie': 'EVAP'},
+        'P0446': {'desc_fr': 'Circuit ventilation EVAP', 'desc_ar': 'دائرة تهوية نظام EVAP', 'cause_fr': 'Vanne ventilation EVAP', 'cause_ar': 'صمام تهوية EVAP', 'solution_fr': 'Tester vanne ventilation', 'solution_ar': 'افحص صمام التهوية', 'prix': '100-350€', 'categorie': 'EVAP'},
+        'P0449': {'desc_fr': 'Circuit commande ventilation EVAP', 'desc_ar': 'دائرة تحكم تهوية EVAP', 'cause_fr': 'Solenoïde ventilation', 'cause_ar': 'ملف التهوية', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '100-350€', 'categorie': 'EVAP'},
+        'P0450': {'desc_fr': 'Circuit capteur pression EVAP', 'desc_ar': 'دائرة حساس ضغط EVAP', 'cause_fr': 'Capteur pression, câblage', 'cause_ar': 'حساس الضغط، أسلاك', 'solution_fr': 'Tester capteur pression', 'solution_ar': 'افحص حساس الضغط', 'prix': '80-300€', 'categorie': 'EVAP'},
+        'P0451': {'desc_fr': 'Problème plage capteur pression EVAP', 'desc_ar': 'مشكل في نطاق حساس ضغط EVAP', 'cause_fr': 'Capteur pression défectueux', 'cause_ar': 'حساس الضغط تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '80-300€', 'categorie': 'EVAP'},
+        'P0452': {'desc_fr': 'Signal bas capteur pression EVAP', 'desc_ar': 'إشارة منخفضة لحساس ضغط EVAP', 'cause_fr': 'Capteur pression HS', 'cause_ar': 'حساس الضغط معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '80-250€', 'categorie': 'EVAP'},
+        'P0453': {'desc_fr': 'Signal haut capteur pression EVAP', 'desc_ar': 'إشارة عالية لحساس ضغط EVAP', 'cause_fr': 'Capteur pression défectueux', 'cause_ar': 'حساس الضغط تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '80-250€', 'categorie': 'EVAP'},
+        'P0454': {'desc_fr': 'Circuit capteur pression EVAP intermittent', 'desc_ar': 'دائرة حساس ضغط EVAP متقطعة', 'cause_fr': 'Capteur pression, connexion', 'cause_ar': 'حساس الضغط، توصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '80-300€', 'categorie': 'EVAP'},
+        'P0455': {'desc_fr': 'Grande fuite détectée système EVAP', 'desc_ar': 'تسريب كبير في نظام EVAP', 'cause_fr': 'Bouchon carburant manquant, grosse fuite', 'cause_ar': 'غطاء البنزين مفقود، تسريب كبير', 'solution_fr': 'Vérifier bouchon, tester EVAP', 'solution_ar': 'تفقد الغطاء، افحص النظام', 'prix': '30-300€', 'categorie': 'EVAP'},
+        'P0456': {'desc_fr': 'Très petite fuite détectée système EVAP', 'desc_ar': 'تسريب صغير جداً في نظام EVAP', 'cause_fr': 'Micro-fuite EVAP', 'cause_ar': 'تسريب دقيق في EVAP', 'solution_fr': 'Tester système EVAP', 'solution_ar': 'افحص النظام بدقة', 'prix': '50-300€', 'categorie': 'EVAP'},
+        'P0457': {'desc_fr': 'Fuite détectée système EVAP bouchon desserré', 'desc_ar': 'تسريب في EVAP بسبب الغطاء', 'cause_fr': 'Bouchon carburant mal serré', 'cause_ar': 'غطاء البنزين غير محكم', 'solution_fr': 'Serrer bouchon', 'solution_ar': 'أحكم غطاء البنزين', 'prix': '20-50€', 'categorie': 'EVAP'},
+        'P0460': {'desc_fr': 'Circuit capteur niveau carburant', 'desc_ar': 'دائرة حساس مستوى الوقود', 'cause_fr': 'Flotteur carburant, câblage', 'cause_ar': 'حساس الوقود، أسلاك', 'solution_fr': 'Tester capteur niveau', 'solution_ar': 'افحص حساس المستوى', 'prix': '100-400€', 'categorie': 'Injection'},
+        'P0461': {'desc_fr': 'Problème plage capteur niveau carburant', 'desc_ar': 'مشكل في نطاق حساس الوقود', 'cause_fr': 'Flotteur défectueux', 'cause_ar': 'حساس الوقود تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Injection'},
+        'P0462': {'desc_fr': 'Signal bas capteur niveau carburant', 'desc_ar': 'إشارة منخفضة لحساس الوقود', 'cause_fr': 'Flotteur HS', 'cause_ar': 'حساس الوقود معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Injection'},
+        'P0463': {'desc_fr': 'Signal haut capteur niveau carburant', 'desc_ar': 'إشارة عالية لحساس الوقود', 'cause_fr': 'Flotteur défectueux', 'cause_ar': 'حساس الوقود تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Injection'},
+        'P0470': {'desc_fr': 'Circuit capteur pression échappement', 'desc_ar': 'دائرة حساس ضغط العادم', 'cause_fr': 'Capteur pression échappement', 'cause_ar': 'حساس ضغط العادم', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0471': {'desc_fr': 'Problème plage capteur pression échappement', 'desc_ar': 'مشكل في نطاق حساس ضغط العادم', 'cause_fr': 'Capteur défectueux', 'cause_ar': 'حساس تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Échappement'},
+        'P0480': {'desc_fr': 'Circuit commande ventilateur refroidissement', 'desc_ar': 'دائرة تحكم مروحة التبريد', 'cause_fr': 'Ventilateur, relais, câblage', 'cause_ar': 'المروحة، المرحل، الأسلاك', 'solution_fr': 'Tester ventilateur', 'solution_ar': 'افحص المروحة', 'prix': '100-400€', 'categorie': 'Refroidissement'},
+        'P0481': {'desc_fr': 'Circuit commande ventilateur 2', 'desc_ar': 'دائرة تحكم المروحة الثانية', 'cause_fr': 'Ventilateur 2, relais', 'cause_ar': 'المروحة الثانية، المرحل', 'solution_fr': 'Tester ventilateur 2', 'solution_ar': 'افحص المروحة 2', 'prix': '100-400€', 'categorie': 'Refroidissement'},
+        'P0488': {'desc_fr': 'Circuit commande papillon EGR', 'desc_ar': 'دائرة تحكم صمام EGR', 'cause_fr': 'Actionneur EGR, câblage', 'cause_ar': 'مشغل EGR، أسلاك', 'solution_fr': 'Tester actionneur EGR', 'solution_ar': 'افحص المشغل', 'prix': '150-500€', 'categorie': 'Antipollution'},
+        
+        # Speed & Idle Control (P05xx)
+        'P0500': {'desc_fr': 'Circuit capteur vitesse véhicule', 'desc_ar': 'دائرة حساس سرعة المركبة', 'cause_fr': 'Capteur vitesse, câblage', 'cause_ar': 'حساس السرعة، أسلاك', 'solution_fr': 'Tester capteur vitesse', 'solution_ar': 'افحص حساس السرعة', 'prix': '80-300€', 'categorie': 'Vitesse'},
+        'P0501': {'desc_fr': 'Problème plage capteur vitesse véhicule', 'desc_ar': 'مشكل في نطاق حساس السرعة', 'cause_fr': 'Capteur vitesse défectueux', 'cause_ar': 'حساس السرعة تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '80-300€', 'categorie': 'Vitesse'},
+        'P0502': {'desc_fr': 'Signal bas capteur vitesse véhicule', 'desc_ar': 'إشارة منخفضة لحساس السرعة', 'cause_fr': 'Capteur vitesse HS', 'cause_ar': 'حساس السرعة معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '80-250€', 'categorie': 'Vitesse'},
+        'P0503': {'desc_fr': 'Signal intermittent capteur vitesse', 'desc_ar': 'إشارة متقطعة لحساس السرعة', 'cause_fr': 'Capteur vitesse, connexion', 'cause_ar': 'حساس السرعة، توصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '80-300€', 'categorie': 'Vitesse'},
+        'P0505': {'desc_fr': 'Système contrôle ralenti', 'desc_ar': 'نظام التحكم في الخمول', 'cause_fr': 'Moteur pas à pas ralenti', 'cause_ar': 'محرك الخمول', 'solution_fr': 'Tester moteur ralenti', 'solution_ar': 'افحص محرك الخمول', 'prix': '100-400€', 'categorie': 'Injection'},
+        'P0506': {'desc_fr': 'Régime ralenti inférieur à la normale', 'desc_ar': 'سرعة الخمول أقل من الطبيعي', 'cause_fr': 'Moteur ralenti, admission', 'cause_ar': 'محرك الخمول، الدخول', 'solution_fr': 'Tester système ralenti', 'solution_ar': 'افحص نظام الخمول', 'prix': '100-400€', 'categorie': 'Injection'},
+        'P0507': {'desc_fr': 'Régime ralenti supérieur à la normale', 'desc_ar': 'سرعة الخمول أعلى من الطبيعي', 'cause_fr': 'Moteur ralenti, fuite vide', 'cause_ar': 'محرك الخمول، تسريب فراغ', 'solution_fr': 'Tester système ralenti', 'solution_ar': 'افحص نظام الخمول', 'prix': '100-400€', 'categorie': 'Injection'},
+        'P0510': {'desc_fr': 'Circuit commutateur position papillon fermé', 'desc_ar': 'دائرة مفتاح وضعية الصمام المغلق', 'cause_fr': 'Switch TPS, câblage', 'cause_ar': 'مفتاح TPS، أسلاك', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Injection'},
+        'P0520': {'desc_fr': 'Circuit capteur pression huile moteur', 'desc_ar': 'دائرة حساس ضغط زيت المحرك', 'cause_fr': 'Capteur pression huile', 'cause_ar': 'حساس ضغط الزيت', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '50-200€', 'categorie': 'Moteur'},
+        'P0521': {'desc_fr': 'Problème plage capteur pression huile', 'desc_ar': 'مشكل في نطاق حساس ضغط الزيت', 'cause_fr': 'Capteur pression huile défectueux', 'cause_ar': 'حساس ضغط الزيت تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '50-200€', 'categorie': 'Moteur'},
+        'P0522': {'desc_fr': 'Signal bas capteur pression huile', 'desc_ar': 'إشارة منخفضة لحساس ضغط الزيت', 'cause_fr': 'Capteur pression huile HS', 'cause_ar': 'حساس ضغط الزيت معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '50-150€', 'categorie': 'Moteur'},
+        'P0523': {'desc_fr': 'Signal haut capteur pression huile', 'desc_ar': 'إشارة عالية لحساس ضغط الزيت', 'cause_fr': 'Capteur pression huile défectueux', 'cause_ar': 'حساس ضغط الزيت تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '50-150€', 'categorie': 'Moteur'},
+        'P0530': {'desc_fr': 'Circuit capteur pression climatisation', 'desc_ar': 'دائرة حساس ضغط التكييف', 'cause_fr': 'Capteur pression A/C', 'cause_ar': 'حساس ضغط التكييف', 'solution_fr': 'Tester capteur A/C', 'solution_ar': 'افحص حساس التكييف', 'prix': '80-300€', 'categorie': 'Climatisation'},
+        'P0531': {'desc_fr': 'Problème plage capteur pression climatisation', 'desc_ar': 'مشكل في نطاق حساس ضغط التكييف', 'cause_fr': 'Capteur pression A/C défectueux', 'cause_ar': 'حساس ضغط التكييف تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '80-300€', 'categorie': 'Climatisation'},
+        'P0532': {'desc_fr': 'Signal bas capteur pression climatisation', 'desc_ar': 'إشارة منخفضة لحساس ضغط التكييف', 'cause_fr': 'Capteur pression A/C HS', 'cause_ar': 'حساس ضغط التكييف معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '80-250€', 'categorie': 'Climatisation'},
+        'P0533': {'desc_fr': 'Signal haut capteur pression climatisation', 'desc_ar': 'إشارة عالية لحساس ضغط التكييف', 'cause_fr': 'Capteur pression A/C défectueux', 'cause_ar': 'حساس ضغط التكييف تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '80-250€', 'categorie': 'Climatisation'},
+        'P0560': {'desc_fr': 'Tension système électrique incorrecte', 'desc_ar': 'جهد النظام الكهربائي غير صحيح', 'cause_fr': 'Alternateur, batterie', 'cause_ar': 'الدينامو، البطارية', 'solution_fr': 'Tester alternateur/batterie', 'solution_ar': 'افحص الدينامو والبطارية', 'prix': '100-500€', 'categorie': 'Électrique'},
+        'P0561': {'desc_fr': 'Tension système instable', 'desc_ar': 'جهد النظام غير مستقر', 'cause_fr': 'Alternateur, régulateur', 'cause_ar': 'الدينامو، المنظم', 'solution_fr': 'Tester alternateur', 'solution_ar': 'افحص الدينامو', 'prix': '150-500€', 'categorie': 'Électrique'},
+        'P0562': {'desc_fr': 'Tension système basse', 'desc_ar': 'جهد النظام منخفض', 'cause_fr': 'Batterie faible, alternateur', 'cause_ar': 'البطارية ضعيفة، الدينامو', 'solution_fr': 'Tester batterie/alternateur', 'solution_ar': 'افحص البطارية والدينامو', 'prix': '100-500€', 'categorie': 'Électrique'},
+        'P0563': {'desc_fr': 'Tension système haute', 'desc_ar': 'جهد النظام مرتفع', 'cause_fr': 'Alternateur surcharge', 'cause_ar': 'الدينامو يشحن كثيراً', 'solution_fr': 'Tester alternateur', 'solution_ar': 'افحص الدينامو', 'prix': '150-500€', 'categorie': 'Électrique'},
+        'P0571': {'desc_fr': 'Circuit commutateur frein', 'desc_ar': 'دائرة مفتاح الفرامل', 'cause_fr': 'Switch frein, câblage', 'cause_ar': 'مفتاح الفرامل، أسلاك', 'solution_fr': 'Tester switch frein', 'solution_ar': 'افحص مفتاح الفرامل', 'prix': '30-150€', 'categorie': 'Freins'},
+        'P0572': {'desc_fr': 'Circuit commutateur frein bas', 'desc_ar': 'دائرة مفتاح الفرامل منخفضة', 'cause_fr': 'Switch frein HS', 'cause_ar': 'مفتاح الفرامل معطوب', 'solution_fr': 'Remplacer switch', 'solution_ar': 'استبدل المفتاح', 'prix': '30-100€', 'categorie': 'Freins'},
+        'P0573': {'desc_fr': 'Circuit commutateur frein haut', 'desc_ar': 'دائرة مفتاح الفرامل عالية', 'cause_fr': 'Switch frein défectueux', 'cause_ar': 'مفتاح الفرامل تالف', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '30-100€', 'categorie': 'Freins'},
+        
+        # Computer & Electronics (P06xx)
+        'P0600': {'desc_fr': 'Communication série ECU', 'desc_ar': 'اتصال تسلسلي للكمبيوتر', 'cause_fr': 'ECU, câblage communication', 'cause_ar': 'الكمبيوتر، أسلاك الاتصال', 'solution_fr': 'Tester ECU', 'solution_ar': 'افحص الكمبيوتر', 'prix': '200-1000€', 'categorie': 'Électronique'},
+        'P0601': {'desc_fr': 'Erreur mémoire interne ECU', 'desc_ar': 'خطأ في ذاكرة الكمبيوتر', 'cause_fr': 'ECU défectueuse', 'cause_ar': 'الكمبيوتر تالف', 'solution_fr': 'Reprogrammer/remplacer ECU', 'solution_ar': 'أعد برمجة أو استبدل الكمبيوتر', 'prix': '300-1500€', 'categorie': 'Électronique'},
+        'P0602': {'desc_fr': 'Erreur programmation ECU', 'desc_ar': 'خطأ في برمجة الكمبيوتر', 'cause_fr': 'ECU non programmée', 'cause_ar': 'الكمبيوتر غير مبرمج', 'solution_fr': 'Programmer ECU', 'solution_ar': 'برمج الكمبيوتر', 'prix': '200-1000€', 'categorie': 'Électronique'},
+        'P0603': {'desc_fr': 'Erreur mémoire KAM ECU', 'desc_ar': 'خطأ في ذاكرة KAM', 'cause_fr': 'ECU, batterie déconnectée', 'cause_ar': 'الكمبيوتر، البطارية مفصولة', 'solution_fr': 'Réinitialiser ECU', 'solution_ar': 'أعد ضبط الكمبيوتر', 'prix': '100-500€', 'categorie': 'Électronique'},
+        'P0604': {'desc_fr': 'Erreur RAM interne ECU', 'desc_ar': 'خطأ في ذاكرة RAM', 'cause_fr': 'ECU défectueuse', 'cause_ar': 'الكمبيوتر تالف', 'solution_fr': 'Tester/remplacer ECU', 'solution_ar': 'افحص أو استبدل الكمبيوتر', 'prix': '300-1500€', 'categorie': 'Électronique'},
+        'P0605': {'desc_fr': 'Erreur ROM interne ECU', 'desc_ar': 'خطأ في ذاكرة ROM', 'cause_fr': 'ECU défectueuse', 'cause_ar': 'الكمبيوتر تالف', 'solution_fr': 'Remplacer ECU', 'solution_ar': 'استبدل الكمبيوتر', 'prix': '300-1500€', 'categorie': 'Électronique'},
+        'P0606': {'desc_fr': 'Défaillance processeur ECU', 'desc_ar': 'عطل في معالج الكمبيوتر', 'cause_fr': 'ECU HS', 'cause_ar': 'الكمبيوتر معطوب', 'solution_fr': 'Remplacer ECU', 'solution_ar': 'استبدل الكمبيوتر', 'prix': '300-1500€', 'categorie': 'Électronique'},
+        'P0607': {'desc_fr': 'Performance système contrôle ECU', 'desc_ar': 'أداء نظام التحكم في الكمبيوتر', 'cause_fr': 'ECU défectueuse', 'cause_ar': 'الكمبيوتر تالف', 'solution_fr': 'Tester ECU', 'solution_ar': 'افحص الكمبيوتر', 'prix': '200-1000€', 'categorie': 'Électronique'},
+        'P0615': {'desc_fr': 'Circuit relais démarreur', 'desc_ar': 'دائرة مرحل الباديء', 'cause_fr': 'Relais démarreur, câblage', 'cause_ar': 'مرحل الباديء، أسلاك', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Démarrage'},
+        'P0616': {'desc_fr': 'Circuit relais démarreur bas', 'desc_ar': 'دائرة مرحل الباديء منخفضة', 'cause_fr': 'Relais démarreur HS', 'cause_ar': 'مرحل الباديء معطوب', 'solution_fr': 'Remplacer relais', 'solution_ar': 'استبدل المرحل', 'prix': '50-200€', 'categorie': 'Démarrage'},
+        'P0617': {'desc_fr': 'Circuit relais démarreur haut', 'desc_ar': 'دائرة مرحل الباديء عالية', 'cause_fr': 'Relais démarreur défectueux', 'cause_ar': 'مرحل الباديء تالف', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Démarrage'},
+        'P0620': {'desc_fr': 'Circuit commande alternateur', 'desc_ar': 'دائرة تحكم الدينامو', 'cause_fr': 'Alternateur, régulateur', 'cause_ar': 'الدينامو، المنظم', 'solution_fr': 'Tester alternateur', 'solution_ar': 'افحص الدينامو', 'prix': '150-600€', 'categorie': 'Électrique'},
+        'P0621': {'desc_fr': 'Circuit lampe témoin alternateur', 'desc_ar': 'دائرة لمبة تحذير الدينامو', 'cause_fr': 'Alternateur, câblage', 'cause_ar': 'الدينامو، أسلاك', 'solution_fr': 'Tester alternateur', 'solution_ar': 'افحص الدينامو', 'prix': '100-500€', 'categorie': 'Électrique'},
+        'P0622': {'desc_fr': 'Circuit borne alternateur', 'desc_ar': 'دائرة طرف الدينامو', 'cause_fr': 'Alternateur, câblage', 'cause_ar': 'الدينامو، أسلاك', 'solution_fr': 'Tester alternateur', 'solution_ar': 'افحص الدينامو', 'prix': '150-600€', 'categorie': 'Électrique'},
+        
+        # Transmission (P07xx-P08xx)
+        'P0700': {'desc_fr': 'Circuit commande transmission', 'desc_ar': 'دائرة تحكم علبة السرعة', 'cause_fr': 'TCM, câblage', 'cause_ar': 'كمبيوتر علبة السرعة، أسلاك', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص كمبيوتر العلبة', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0701': {'desc_fr': 'Problème plage commande transmission', 'desc_ar': 'مشكل في نطاق تحكم العلبة', 'cause_fr': 'TCM défectueux', 'cause_ar': 'كمبيوتر العلبة تالف', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص الكمبيوتر', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0703': {'desc_fr': 'Circuit commutateur frein transmission', 'desc_ar': 'دائرة مفتاح فرامل العلبة', 'cause_fr': 'Switch frein, TCM', 'cause_ar': 'مفتاح الفرامل، كمبيوتر العلبة', 'solution_fr': 'Tester switch frein', 'solution_ar': 'افحص مفتاح الفرامل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0704': {'desc_fr': 'Circuit commutateur embrayage', 'desc_ar': 'دائرة مفتاح القابض', 'cause_fr': 'Switch embrayage, câblage', 'cause_ar': 'مفتاح القابض، أسلاك', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0705': {'desc_fr': 'Circuit capteur position levier vitesse', 'desc_ar': 'دائرة حساس وضعية ناقل السرعة', 'cause_fr': 'Capteur position, câblage', 'cause_ar': 'حساس الوضعية، أسلاك', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0706': {'desc_fr': 'Problème plage capteur position levier', 'desc_ar': 'مشكل في نطاق حساس الوضعية', 'cause_fr': 'Capteur position défectueux', 'cause_ar': 'حساس الوضعية تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0707': {'desc_fr': 'Signal bas capteur position levier', 'desc_ar': 'إشارة منخفضة لحساس الوضعية', 'cause_fr': 'Capteur position HS', 'cause_ar': 'حساس الوضعية معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0708': {'desc_fr': 'Signal haut capteur position levier', 'desc_ar': 'إشارة عالية لحساس الوضعية', 'cause_fr': 'Capteur position défectueux', 'cause_ar': 'حساس الوضعية تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0710': {'desc_fr': 'Circuit capteur température transmission', 'desc_ar': 'دائرة حساس حرارة علبة السرعة', 'cause_fr': 'Capteur température ATF', 'cause_ar': 'حساس حرارة الزيت', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0711': {'desc_fr': 'Problème plage capteur température transmission', 'desc_ar': 'مشكل في نطاق حساس حرارة العلبة', 'cause_fr': 'Capteur température défectueux', 'cause_ar': 'حساس الحرارة تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0712': {'desc_fr': 'Signal bas capteur température transmission', 'desc_ar': 'إشارة منخفضة لحساس حرارة العلبة', 'cause_fr': 'Capteur température HS', 'cause_ar': 'حساس الحرارة معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0713': {'desc_fr': 'Signal haut capteur température transmission', 'desc_ar': 'إشارة عالية لحساس حرارة العلبة', 'cause_fr': 'Capteur température défectueux', 'cause_ar': 'حساس الحرارة تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0714': {'desc_fr': 'Circuit capteur température transmission intermittent', 'desc_ar': 'دائرة حساس حرارة العلبة متقطعة', 'cause_fr': 'Capteur température, connexion', 'cause_ar': 'حساس الحرارة، توصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0715': {'desc_fr': 'Circuit capteur vitesse turbine transmission', 'desc_ar': 'دائرة حساس سرعة التوربين', 'cause_fr': 'Capteur vitesse turbine', 'cause_ar': 'حساس سرعة التوربين', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0716': {'desc_fr': 'Problème plage capteur vitesse turbine', 'desc_ar': 'مشكل في نطاق حساس سرعة التوربين', 'cause_fr': 'Capteur turbine défectueux', 'cause_ar': 'حساس التوربين تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0717': {'desc_fr': 'Signal bas capteur vitesse turbine', 'desc_ar': 'إشارة منخفضة لحساس سرعة التوربين', 'cause_fr': 'Capteur turbine HS', 'cause_ar': 'حساس التوربين معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0718': {'desc_fr': 'Circuit capteur vitesse turbine intermittent', 'desc_ar': 'دائرة حساس سرعة التوربين متقطعة', 'cause_fr': 'Capteur turbine, connexion', 'cause_ar': 'حساس التوربين، توصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0719': {'desc_fr': 'Circuit commutateur frein transmission bas', 'desc_ar': 'دائرة مفتاح فرامل العلبة منخفضة', 'cause_fr': 'Switch frein, TCM', 'cause_ar': 'مفتاح الفرامل، كمبيوتر العلبة', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0720': {'desc_fr': 'Circuit capteur vitesse sortie transmission', 'desc_ar': 'دائرة حساس سرعة خرج العلبة', 'cause_fr': 'Capteur vitesse sortie', 'cause_ar': 'حساس سرعة الخرج', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0721': {'desc_fr': 'Problème plage capteur vitesse sortie', 'desc_ar': 'مشكل في نطاق حساس سرعة الخرج', 'cause_fr': 'Capteur vitesse défectueux', 'cause_ar': 'حساس السرعة تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0722': {'desc_fr': 'Signal bas capteur vitesse sortie', 'desc_ar': 'إشارة منخفضة لحساس سرعة الخرج', 'cause_fr': 'Capteur vitesse HS', 'cause_ar': 'حساس السرعة معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0723': {'desc_fr': 'Circuit capteur vitesse sortie intermittent', 'desc_ar': 'دائرة حساس سرعة الخرج متقطعة', 'cause_fr': 'Capteur vitesse, connexion', 'cause_ar': 'حساس السرعة، توصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0724': {'desc_fr': 'Circuit commutateur frein transmission haut', 'desc_ar': 'دائرة مفتاح فرامل العلبة عالية', 'cause_fr': 'Switch frein défectueux', 'cause_ar': 'مفتاح الفرامل تالف', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0725': {'desc_fr': 'Circuit capteur régime moteur transmission', 'desc_ar': 'دائرة حساس سرعة المحرك للعلبة', 'cause_fr': 'Capteur régime, TCM', 'cause_ar': 'حساس السرعة، كمبيوتر العلبة', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0726': {'desc_fr': 'Problème plage capteur régime moteur', 'desc_ar': 'مشكل في نطاق حساس سرعة المحرك', 'cause_fr': 'Capteur régime défectueux', 'cause_ar': 'حساس السرعة تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0727': {'desc_fr': 'Signal bas capteur régime moteur', 'desc_ar': 'إشارة منخفضة لحساس سرعة المحرك', 'cause_fr': 'Capteur régime HS', 'cause_ar': 'حساس السرعة معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0728': {'desc_fr': 'Circuit capteur régime moteur intermittent', 'desc_ar': 'دائرة حساس سرعة المحرك متقطعة', 'cause_fr': 'Capteur régime, connexion', 'cause_ar': 'حساس السرعة، توصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0730': {'desc_fr': 'Rapport de vitesse incorrect', 'desc_ar': 'نسبة السرعة غير صحيحة', 'cause_fr': 'Problème transmission', 'cause_ar': 'مشكل في علبة السرعة', 'solution_fr': 'Diagnostiquer transmission', 'solution_ar': 'شخص علبة السرعة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0731': {'desc_fr': 'Rapport 1 incorrect', 'desc_ar': 'السرعة الأولى غير صحيحة', 'cause_fr': 'Problème rapport 1', 'cause_ar': 'مشكل في السرعة الأولى', 'solution_fr': 'Tester transmission', 'solution_ar': 'افحص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0732': {'desc_fr': 'Rapport 2 incorrect', 'desc_ar': 'السرعة الثانية غير صحيحة', 'cause_fr': 'Problème rapport 2', 'cause_ar': 'مشكل في السرعة الثانية', 'solution_fr': 'Tester transmission', 'solution_ar': 'افحص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0733': {'desc_fr': 'Rapport 3 incorrect', 'desc_ar': 'السرعة الثالثة غير صحيحة', 'cause_fr': 'Problème rapport 3', 'cause_ar': 'مشكل في السرعة الثالثة', 'solution_fr': 'Tester transmission', 'solution_ar': 'افحص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0734': {'desc_fr': 'Rapport 4 incorrect', 'desc_ar': 'السرعة الرابعة غير صحيحة', 'cause_fr': 'Problème rapport 4', 'cause_ar': 'مشكل في السرعة الرابعة', 'solution_fr': 'Tester transmission', 'solution_ar': 'افحص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0735': {'desc_fr': 'Rapport 5 incorrect', 'desc_ar': 'السرعة الخامسة غير صحيحة', 'cause_fr': 'Problème rapport 5', 'cause_ar': 'مشكل في السرعة الخامسة', 'solution_fr': 'Tester transmission', 'solution_ar': 'افحص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0736': {'desc_fr': 'Rapport marche arrière incorrect', 'desc_ar': 'السرعة العكسية غير صحيحة', 'cause_fr': 'Problème marche arrière', 'cause_ar': 'مشكل في الرجوع للخلف', 'solution_fr': 'Tester transmission', 'solution_ar': 'افحص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0740': {'desc_fr': 'Circuit convertisseur couple', 'desc_ar': 'دائرة محول العزم', 'cause_fr': 'Convertisseur couple, TCM', 'cause_ar': 'محول العزم، كمبيوتر العلبة', 'solution_fr': 'Tester convertisseur', 'solution_ar': 'افحص المحول', 'prix': '300-1500€', 'categorie': 'Transmission'},
+        'P0741': {'desc_fr': 'Performances convertisseur couple', 'desc_ar': 'أداء محول العزم', 'cause_fr': 'Convertisseur couple HS', 'cause_ar': 'محول العزم معطوب', 'solution_fr': 'Tester convertisseur', 'solution_ar': 'افحص المحول', 'prix': '300-1500€', 'categorie': 'Transmission'},
+        'P0742': {'desc_fr': 'Convertisseur couple bloqué', 'desc_ar': 'محول العزم عالق', 'cause_fr': 'Convertisseur bloqué', 'cause_ar': 'المحول عالق', 'solution_fr': 'Tester convertisseur', 'solution_ar': 'افحص المحول', 'prix': '300-1500€', 'categorie': 'Transmission'},
+        'P0743': {'desc_fr': 'Circuit commande convertisseur couple', 'desc_ar': 'دائرة تحكم محول العزم', 'cause_fr': 'Solenoïde convertisseur', 'cause_ar': 'ملف المحول', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0744': {'desc_fr': 'Circuit commande convertisseur intermittent', 'desc_ar': 'دائرة تحكم المحول متقطعة', 'cause_fr': 'Solenoïde, connexion', 'cause_ar': 'الملف، التوصيل', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0750': {'desc_fr': 'Circuit solenoïde A', 'desc_ar': 'دائرة الملف A', 'cause_fr': 'Solenoïde A, câblage', 'cause_ar': 'الملف A، الأسلاك', 'solution_fr': 'Tester solenoïde A', 'solution_ar': 'افحص الملف A', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0751': {'desc_fr': 'Performances solenoïde A', 'desc_ar': 'أداء الملف A', 'cause_fr': 'Solenoïde A défectueux', 'cause_ar': 'الملف A تالف', 'solution_fr': 'Tester solenoïde A', 'solution_ar': 'افحص الملف A', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0752': {'desc_fr': 'Solenoïde A bloqué', 'desc_ar': 'الملف A عالق', 'cause_fr': 'Solenoïde A bloqué', 'cause_ar': 'الملف A عالق', 'solution_fr': 'Tester solenoïde A', 'solution_ar': 'افحص الملف A', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0753': {'desc_fr': 'Circuit commande solenoïde A', 'desc_ar': 'دائرة تحكم الملف A', 'cause_fr': 'Solenoïde A, câblage', 'cause_ar': 'الملف A، الأسلاك', 'solution_fr': 'Tester solenoïde A', 'solution_ar': 'افحص الملف A', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0754': {'desc_fr': 'Circuit commande solenoïde A intermittent', 'desc_ar': 'دائرة تحكم الملف A متقطعة', 'cause_fr': 'Solenoïde A, connexion', 'cause_ar': 'الملف A، التوصيل', 'solution_fr': 'Tester solenoïde A', 'solution_ar': 'افحص الملف A', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0755': {'desc_fr': 'Circuit solenoïde B', 'desc_ar': 'دائرة الملف B', 'cause_fr': 'Solenoïde B, câblage', 'cause_ar': 'الملف B، الأسلاك', 'solution_fr': 'Tester solenoïde B', 'solution_ar': 'افحص الملف B', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0756': {'desc_fr': 'Performances solenoïde B', 'desc_ar': 'أداء الملف B', 'cause_fr': 'Solenoïde B défectueux', 'cause_ar': 'الملف B تالف', 'solution_fr': 'Tester solenoïde B', 'solution_ar': 'افحص الملف B', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0757': {'desc_fr': 'Solenoïde B bloqué', 'desc_ar': 'الملف B عالق', 'cause_fr': 'Solenoïde B bloqué', 'cause_ar': 'الملف B عالق', 'solution_fr': 'Tester solenoïde B', 'solution_ar': 'افحص الملف B', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0758': {'desc_fr': 'Circuit commande solenoïde B', 'desc_ar': 'دائرة تحكم الملف B', 'cause_fr': 'Solenoïde B, câblage', 'cause_ar': 'الملف B، الأسلاك', 'solution_fr': 'Tester solenoïde B', 'solution_ar': 'افحص الملف B', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0759': {'desc_fr': 'Circuit commande solenoïde B intermittent', 'desc_ar': 'دائرة تحكم الملف B متقطعة', 'cause_fr': 'Solenoïde B, connexion', 'cause_ar': 'الملف B، التوصيل', 'solution_fr': 'Tester solenoïde B', 'solution_ar': 'افحص الملف B', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0760': {'desc_fr': 'Circuit solenoïde C', 'desc_ar': 'دائرة الملف C', 'cause_fr': 'Solenoïde C, câblage', 'cause_ar': 'الملف C، الأسلاك', 'solution_fr': 'Tester solenoïde C', 'solution_ar': 'افحص الملف C', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0761': {'desc_fr': 'Performances solenoïde C', 'desc_ar': 'أداء الملف C', 'cause_fr': 'Solenoïde C défectueux', 'cause_ar': 'الملف C تالف', 'solution_fr': 'Tester solenoïde C', 'solution_ar': 'افحص الملف C', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0762': {'desc_fr': 'Solenoïde C bloqué', 'desc_ar': 'الملف C عالق', 'cause_fr': 'Solenoïde C bloqué', 'cause_ar': 'الملف C عالق', 'solution_fr': 'Tester solenoïde C', 'solution_ar': 'افحص الملف C', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0763': {'desc_fr': 'Circuit commande solenoïde C', 'desc_ar': 'دائرة تحكم الملف C', 'cause_fr': 'Solenoïde C, câblage', 'cause_ar': 'الملف C، الأسلاك', 'solution_fr': 'Tester solenoïde C', 'solution_ar': 'افحص الملف C', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0764': {'desc_fr': 'Circuit commande solenoïde C intermittent', 'desc_ar': 'دائرة تحكم الملف C متقطعة', 'cause_fr': 'Solenoïde C, connexion', 'cause_ar': 'الملف C، التوصيل', 'solution_fr': 'Tester solenoïde C', 'solution_ar': 'افحص الملف C', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0765': {'desc_fr': 'Circuit solenoïde D', 'desc_ar': 'دائرة الملف D', 'cause_fr': 'Solenoïde D, câblage', 'cause_ar': 'الملف D، الأسلاك', 'solution_fr': 'Tester solenoïde D', 'solution_ar': 'افحص الملف D', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0766': {'desc_fr': 'Performances solenoïde D', 'desc_ar': 'أداء الملف D', 'cause_fr': 'Solenoïde D défectueux', 'cause_ar': 'الملف D تالف', 'solution_fr': 'Tester solenoïde D', 'solution_ar': 'افحص الملف D', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0767': {'desc_fr': 'Solenoïde D bloqué', 'desc_ar': 'الملف D عالق', 'cause_fr': 'Solenoïde D bloqué', 'cause_ar': 'الملف D عالق', 'solution_fr': 'Tester solenoïde D', 'solution_ar': 'افحص الملف D', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0768': {'desc_fr': 'Circuit commande solenoïde D', 'desc_ar': 'دائرة تحكم الملف D', 'cause_fr': 'Solenoïde D, câblage', 'cause_ar': 'الملف D، الأسلاك', 'solution_fr': 'Tester solenoïde D', 'solution_ar': 'افحص الملف D', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0769': {'desc_fr': 'Circuit commande solenoïde D intermittent', 'desc_ar': 'دائرة تحكم الملف D متقطعة', 'cause_fr': 'Solenoïde D, connexion', 'cause_ar': 'الملف D، التوصيل', 'solution_fr': 'Tester solenoïde D', 'solution_ar': 'افحص الملف D', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0770': {'desc_fr': 'Circuit solenoïde E', 'desc_ar': 'دائرة الملف E', 'cause_fr': 'Solenoïde E, câblage', 'cause_ar': 'الملف E، الأسلاك', 'solution_fr': 'Tester solenoïde E', 'solution_ar': 'افحص الملف E', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0771': {'desc_fr': 'Performances solenoïde E', 'desc_ar': 'أداء الملف E', 'cause_fr': 'Solenoïde E défectueux', 'cause_ar': 'الملف E تالف', 'solution_fr': 'Tester solenoïde E', 'solution_ar': 'افحص الملف E', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0772': {'desc_fr': 'Solenoïde E bloqué', 'desc_ar': 'الملف E عالق', 'cause_fr': 'Solenoïde E bloqué', 'cause_ar': 'الملف E عالق', 'solution_fr': 'Tester solenoïde E', 'solution_ar': 'افحص الملف E', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0773': {'desc_fr': 'Circuit commande solenoïde E', 'desc_ar': 'دائرة تحكم الملف E', 'cause_fr': 'Solenoïde E, câblage', 'cause_ar': 'الملف E، الأسلاك', 'solution_fr': 'Tester solenoïde E', 'solution_ar': 'افحص الملف E', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0774': {'desc_fr': 'Circuit commande solenoïde E intermittent', 'desc_ar': 'دائرة تحكم الملف E متقطعة', 'cause_fr': 'Solenoïde E, connexion', 'cause_ar': 'الملف E، التوصيل', 'solution_fr': 'Tester solenoïde E', 'solution_ar': 'افحص الملف E', 'prix': '150-600€', 'categorie': 'Transmission'},
+        
+        # Additional Transmission Codes
+        'P0800': {'desc_fr': 'Circuit commande lampe transfert', 'desc_ar': 'دائرة لمبة النقل', 'cause_fr': 'Lampe transfert, câblage', 'cause_ar': 'لمبة النقل، الأسلاك', 'solution_fr': 'Tester lampe', 'solution_ar': 'افحص اللمبة', 'prix': '30-150€', 'categorie': 'Transmission'},
+        'P0801': {'desc_fr': 'Circuit commutateur inverseur', 'desc_ar': 'دائرة مفتاح العكس', 'cause_fr': 'Switch inverseur', 'cause_ar': 'مفتاح العكس', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0803': {'desc_fr': 'Circuit commande skip shift', 'desc_ar': 'دائرة تحكم تخطي النقل', 'cause_fr': 'Solenoïde skip shift', 'cause_ar': 'ملف تخطي النقل', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0804': {'desc_fr': 'Circuit lampe skip shift', 'desc_ar': 'دائرة لمبة تخطي النقل', 'cause_fr': 'Lampe skip shift', 'cause_ar': 'لمبة تخطي النقل', 'solution_fr': 'Tester lampe', 'solution_ar': 'افحص اللمبة', 'prix': '30-150€', 'categorie': 'Transmission'},
+        'P0805': {'desc_fr': 'Circuit capteur position embrayage', 'desc_ar': 'دائرة حساس وضعية القابض', 'cause_fr': 'Capteur embrayage', 'cause_ar': 'حساس القابض', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0806': {'desc_fr': 'Problème plage capteur position embrayage', 'desc_ar': 'مشكل في نطاق حساس وضعية القابض', 'cause_fr': 'Capteur embrayage défectueux', 'cause_ar': 'حساس القابض تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0807': {'desc_fr': 'Signal bas capteur position embrayage', 'desc_ar': 'إشارة منخفضة لحساس وضعية القابض', 'cause_fr': 'Capteur embrayage HS', 'cause_ar': 'حساس القابض معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0808': {'desc_fr': 'Signal haut capteur position embrayage', 'desc_ar': 'إشارة عالية لحساس وضعية القابض', 'cause_fr': 'Capteur embrayage défectueux', 'cause_ar': 'حساس القابض تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0809': {'desc_fr': 'Circuit capteur position embrayage intermittent', 'desc_ar': 'دائرة حساس وضعية القابض متقطعة', 'cause_fr': 'Capteur embrayage, connexion', 'cause_ar': 'حساس القابض، التوصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0810': {'desc_fr': 'Circuit commande position embrayage', 'desc_ar': 'دائرة تحكم وضعية القابض', 'cause_fr': 'Actionneur embrayage', 'cause_ar': 'مشغل القابض', 'solution_fr': 'Tester actionneur', 'solution_ar': 'افحص المشغل', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0811': {'desc_fr': 'Performances excessives embrayage', 'desc_ar': 'أداء مفرط للقابض', 'cause_fr': 'Embrayage usé', 'cause_ar': 'القابض مستهلك', 'solution_fr': 'Tester embrayage', 'solution_ar': 'افحص القابض', 'prix': '300-1000€', 'categorie': 'Transmission'},
+        'P0812': {'desc_fr': 'Circuit commutateur point mort arrière', 'desc_ar': 'دائرة مفتاح النقطة الميتة الخلفية', 'cause_fr': 'Switch point mort', 'cause_ar': 'مفتاح النقطة الميتة', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0813': {'desc_fr': 'Circuit commutateur point mort avant', 'desc_ar': 'دائرة مفتاح النقطة الميتة الأمامية', 'cause_fr': 'Switch point mort', 'cause_ar': 'مفتاح النقطة الميتة', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0814': {'desc_fr': 'Circuit affichage gamme transmission', 'desc_ar': 'دائرة عرض نطاق علبة السرعة', 'cause_fr': 'Affichage, TCM', 'cause_ar': 'العرض، كمبيوتر العلبة', 'solution_fr': 'Tester affichage', 'solution_ar': 'افحص العرض', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0815': {'desc_fr': 'Circuit commutateur upshift', 'desc_ar': 'دائرة مفتاح رفع السرعة', 'cause_fr': 'Switch upshift', 'cause_ar': 'مفتاح رفع السرعة', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0816': {'desc_fr': 'Circuit commutateur downshift', 'desc_ar': 'دائرة مفتاح خفض السرعة', 'cause_fr': 'Switch downshift', 'cause_ar': 'مفتاح خفض السرعة', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0817': {'desc_fr': 'Circuit commutateur starter', 'desc_ar': 'دائرة مفتاح الباديء', 'cause_fr': 'Switch starter', 'cause_ar': 'مفتاح الباديء', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '30-150€', 'categorie': 'Démarrage'},
+        'P0818': {'desc_fr': 'Circuit commutateur neutre sécurité', 'desc_ar': 'دائرة مفتاح الأمان للوضعية المحايدة', 'cause_fr': 'Switch neutre', 'cause_ar': 'مفتاح الوضعية المحايدة', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0819': {'desc_fr': 'Circuit commutateur neutre sécurité bas', 'desc_ar': 'دائرة مفتاح الأمان المحايد منخفضة', 'cause_fr': 'Switch neutre HS', 'cause_ar': 'مفتاح الأمان معطوب', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0820': {'desc_fr': 'Circuit capteur position levier X-Y', 'desc_ar': 'دائرة حساس وضعية الناقل X-Y', 'cause_fr': 'Capteur position X-Y', 'cause_ar': 'حساس الوضعية X-Y', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0821': {'desc_fr': 'Problème plage capteur position levier X', 'desc_ar': 'مشكل في نطاق حساس وضعية الناقل X', 'cause_fr': 'Capteur position X défectueux', 'cause_ar': 'حساس الوضعية X تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0822': {'desc_fr': 'Circuit capteur position levier X', 'desc_ar': 'دائرة حساس وضعية الناقل X', 'cause_fr': 'Capteur position X', 'cause_ar': 'حساس الوضعية X', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0823': {'desc_fr': 'Circuit commutateur position levier X', 'desc_ar': 'دائرة مفتاح وضعية الناقل X', 'cause_fr': 'Switch position X', 'cause_ar': 'مفتاح الوضعية X', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0824': {'desc_fr': 'Circuit capteur position levier Y', 'desc_ar': 'دائرة حساس وضعية الناقل Y', 'cause_fr': 'Capteur position Y', 'cause_ar': 'حساس الوضعية Y', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0825': {'desc_fr': 'Problème plage capteur position levier Y', 'desc_ar': 'مشكل في نطاق حساس وضعية الناقل Y', 'cause_fr': 'Capteur position Y défectueux', 'cause_ar': 'حساس الوضعية Y تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0826': {'desc_fr': 'Circuit commutateur up/down', 'desc_ar': 'دائرة مفتاح الرفع/الخفض', 'cause_fr': 'Switch up/down', 'cause_ar': 'مفتاح الرفع/الخفض', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0827': {'desc_fr': 'Circuit commutateur up/down bas', 'desc_ar': 'دائرة مفتاح الرفع/الخفض منخفضة', 'cause_fr': 'Switch up/down HS', 'cause_ar': 'مفتاح الرفع/الخفض معطوب', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0828': {'desc_fr': 'Circuit commutateur up/down haut', 'desc_ar': 'دائرة مفتاح الرفع/الخفض عالية', 'cause_fr': 'Switch up/down défectueux', 'cause_ar': 'مفتاح الرفع/الخفض تالف', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0829': {'desc_fr': 'Circuit commutateur 5-6', 'desc_ar': 'دائرة مفتاح السرعة 5-6', 'cause_fr': 'Switch 5-6', 'cause_ar': 'مفتاح السرعة 5-6', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0830': {'desc_fr': 'Circuit commutateur position embrayage A', 'desc_ar': 'دائرة مفتاح وضعية القابض A', 'cause_fr': 'Switch embrayage A', 'cause_ar': 'مفتاح القابض A', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0831': {'desc_fr': 'Circuit commutateur position embrayage A bas', 'desc_ar': 'دائرة مفتاح وضعية القابض A منخفضة', 'cause_fr': 'Switch embrayage A HS', 'cause_ar': 'مفتاح القابض A معطوب', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0832': {'desc_fr': 'Circuit commutateur position embrayage A haut', 'desc_ar': 'دائرة مفتاح وضعية القابض A عالية', 'cause_fr': 'Switch embrayage A défectueux', 'cause_ar': 'مفتاح القابض A تالف', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0833': {'desc_fr': 'Circuit commutateur position embrayage B', 'desc_ar': 'دائرة مفتاح وضعية القابض B', 'cause_fr': 'Switch embrayage B', 'cause_ar': 'مفتاح القابض B', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0834': {'desc_fr': 'Circuit commutateur position embrayage B bas', 'desc_ar': 'دائرة مفتاح وضعية القابض B منخفضة', 'cause_fr': 'Switch embrayage B HS', 'cause_ar': 'مفتاح القابض B معطوب', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0835': {'desc_fr': 'Circuit commutateur position embrayage B haut', 'desc_ar': 'دائرة مفتاح وضعية القابض B عالية', 'cause_fr': 'Switch embrayage B défectueux', 'cause_ar': 'مفتاح القابض B تالف', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0836': {'desc_fr': 'Circuit capteur position 4 roues motrices', 'desc_ar': 'دائرة حساس وضعية الدفع الرباعي', 'cause_fr': 'Capteur 4WD', 'cause_ar': 'حساس الدفع الرباعي', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0837': {'desc_fr': 'Problème plage capteur position 4 roues motrices', 'desc_ar': 'مشكل في نطاق حساس وضعية الدفع الرباعي', 'cause_fr': 'Capteur 4WD défectueux', 'cause_ar': 'حساس الدفع الرباعي تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0838': {'desc_fr': 'Circuit capteur position 4 roues motrices bas', 'desc_ar': 'دائرة حساس وضعية الدفع الرباعي منخفضة', 'cause_fr': 'Capteur 4WD HS', 'cause_ar': 'حساس الدفع الرباعي معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0839': {'desc_fr': 'Circuit capteur position 4 roues motrices haut', 'desc_ar': 'دائرة حساس وضعية الدفع الرباعي عالية', 'cause_fr': 'Capteur 4WD défectueux', 'cause_ar': 'حساس الدفع الرباعي تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        
+        # Pressure Control Solenoids
+        'P0840': {'desc_fr': 'Circuit capteur pression liquide transmission', 'desc_ar': 'دائرة حساس ضغط سائل علبة السرعة', 'cause_fr': 'Capteur pression ATF', 'cause_ar': 'حساس ضغط الزيت', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0841': {'desc_fr': 'Problème plage capteur pression liquide transmission', 'desc_ar': 'مشكل في نطاق حساس ضغط سائل العلبة', 'cause_fr': 'Capteur pression défectueux', 'cause_ar': 'حساس الضغط تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0842': {'desc_fr': 'Signal bas capteur pression liquide transmission', 'desc_ar': 'إشارة منخفضة لحساس ضغط سائل العلبة', 'cause_fr': 'Capteur pression HS', 'cause_ar': 'حساس الضغط معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0843': {'desc_fr': 'Signal haut capteur pression liquide transmission', 'desc_ar': 'إشارة عالية لحساس ضغط سائل العلبة', 'cause_fr': 'Capteur pression défectueux', 'cause_ar': 'حساس الضغط تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0844': {'desc_fr': 'Circuit capteur pression liquide transmission intermittent', 'desc_ar': 'دائرة حساس ضغط سائل العلبة متقطعة', 'cause_fr': 'Capteur pression, connexion', 'cause_ar': 'حساس الضغط، التوصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0845': {'desc_fr': 'Circuit solenoïde pression liquide B', 'desc_ar': 'دائرة ملف ضغط السائل B', 'cause_fr': 'Solenoïde pression B', 'cause_ar': 'ملف ضغط السائل B', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0846': {'desc_fr': 'Problème plage solenoïde pression liquide B', 'desc_ar': 'مشكل في نطاق ملف ضغط السائل B', 'cause_fr': 'Solenoïde pression B défectueux', 'cause_ar': 'ملف ضغط السائل B تالف', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0847': {'desc_fr': 'Circuit commande solenoïde pression liquide B bas', 'desc_ar': 'دائرة تحكم ملف ضغط السائل B منخفضة', 'cause_fr': 'Solenoïde pression B HS', 'cause_ar': 'ملف ضغط السائل B معطوب', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0848': {'desc_fr': 'Circuit commande solenoïde pression liquide B haut', 'desc_ar': 'دائرة تحكم ملف ضغط السائل B عالية', 'cause_fr': 'Solenoïde pression B défectueux', 'cause_ar': 'ملف ضغط السائل B تالف', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0849': {'desc_fr': 'Circuit commande solenoïde pression liquide B intermittent', 'desc_ar': 'دائرة تحكم ملف ضغط السائل B متقطعة', 'cause_fr': 'Solenoïde pression B, connexion', 'cause_ar': 'ملف ضغط السائل B، التوصيل', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        
+        # More Transmission Codes
+        'P0850': {'desc_fr': 'Circuit commutateur point mort/park', 'desc_ar': 'دائرة مفتاح النقطة الميتة/الانتظار', 'cause_fr': 'Switch P/N', 'cause_ar': 'مفتاح P/N', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0851': {'desc_fr': 'Circuit commutateur point mort/park bas', 'desc_ar': 'دائرة مفتاح النقطة الميتة/الانتظار منخفضة', 'cause_fr': 'Switch P/N HS', 'cause_ar': 'مفتاح P/N معطوب', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0852': {'desc_fr': 'Circuit commutateur point mort/park haut', 'desc_ar': 'دائرة مفتاح النقطة الميتة/الانتظار عالية', 'cause_fr': 'Switch P/N défectueux', 'cause_ar': 'مفتاح P/N تالف', 'solution_fr': 'Tester switch', 'solution_ar': 'افحص المفتاح', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0853': {'desc_fr': 'Circuit commande système actif', 'desc_ar': 'دائرة تحكم النظام النشط', 'cause_fr': 'Système actif, TCM', 'cause_ar': 'النظام النشط، كمبيوتر العلبة', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0854': {'desc_fr': 'Circuit commande système actif bas', 'desc_ar': 'دائرة تحكم النظام النشط منخفضة', 'cause_fr': 'Système actif HS', 'cause_ar': 'النظام النشط معطوب', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0855': {'desc_fr': 'Circuit commande système actif haut', 'desc_ar': 'دائرة تحكم النظام النشط عالية', 'cause_fr': 'Système actif défectueux', 'cause_ar': 'النظام النشط تالف', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0856': {'desc_fr': 'Circuit commande système actif intermittent', 'desc_ar': 'دائرة تحكم النظام النشط متقطعة', 'cause_fr': 'Système actif, connexion', 'cause_ar': 'النظام النشط، التوصيل', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0857': {'desc_fr': 'Problème plage système actif', 'desc_ar': 'مشكل في نطاق النظام النشط', 'cause_fr': 'Système actif défectueux', 'cause_ar': 'النظام النشط تالف', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0858': {'desc_fr': 'Circuit commande système actif bas', 'desc_ar': 'دائرة تحكم النظام النشط منخفضة', 'cause_fr': 'Système actif HS', 'cause_ar': 'النظام النشط معطوب', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0859': {'desc_fr': 'Circuit commande système actif haut', 'desc_ar': 'دائرة تحكم النظام النشط عالية', 'cause_fr': 'Système actif défectueux', 'cause_ar': 'النظام النشط تالف', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0860': {'desc_fr': 'Circuit communication TCM', 'desc_ar': 'دائرة اتصال كمبيوتر علبة السرعة', 'cause_fr': 'TCM, câblage CAN', 'cause_ar': 'كمبيوتر العلبة، أسلاك CAN', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص كمبيوتر العلبة', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0861': {'desc_fr': 'Circuit alimentation TCM bas', 'desc_ar': 'دائرة تغذية كمبيوتر العلبة منخفضة', 'cause_fr': 'Alimentation TCM', 'cause_ar': 'تغذية كمبيوتر العلبة', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0862': {'desc_fr': 'Circuit alimentation TCM haut', 'desc_ar': 'دائرة تغذية كمبيوتر العلبة عالية', 'cause_fr': 'Alimentation TCM défectueuse', 'cause_ar': 'تغذية كمبيوتر العلبة تالفة', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0863': {'desc_fr': 'Circuit communication TCM intermittent', 'desc_ar': 'دائرة اتصال كمبيوتر العلبة متقطعة', 'cause_fr': 'TCM, connexion CAN', 'cause_ar': 'كمبيوتر العلبة، اتصال CAN', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص كمبيوتر العلبة', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0864': {'desc_fr': 'Plage communication TCM', 'desc_ar': 'نطاق اتصال كمبيوتر العلبة', 'cause_fr': 'TCM défectueux', 'cause_ar': 'كمبيوتر العلبة تالف', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص كمبيوتر العلبة', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0865': {'desc_fr': 'Circuit communication TCM bas', 'desc_ar': 'دائرة اتصال كمبيوتر العلبة منخفضة', 'cause_fr': 'TCM, câblage', 'cause_ar': 'كمبيوتر العلبة، أسلاك', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص كمبيوتر العلبة', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0866': {'desc_fr': 'Circuit communication TCM haut', 'desc_ar': 'دائرة اتصال كمبيوتر العلبة عالية', 'cause_fr': 'TCM défectueux', 'cause_ar': 'كمبيوتر العلبة تالف', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص كمبيوتر العلبة', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0867': {'desc_fr': 'Performances système contrôle pression transmission', 'desc_ar': 'أداء نظام التحكم في ضغط العلبة', 'cause_fr': 'Système pression défectueux', 'cause_ar': 'نظام الضغط تالف', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0868': {'desc_fr': 'Pression liquide transmission basse', 'desc_ar': 'ضغط سائل علبة السرعة منخفض', 'cause_fr': 'Niveau ATF bas, pompe', 'cause_ar': 'مستوى الزيت منخفض، المضخة', 'solution_fr': 'Vérifier niveau ATF', 'solution_ar': 'تفقد مستوى الزيت', 'prix': '50-500€', 'categorie': 'Transmission'},
+        'P0869': {'desc_fr': 'Pression liquide transmission haute', 'desc_ar': 'ضغط سائل علبة السرعة مرتفع', 'cause_fr': 'Régulateur pression HS', 'cause_ar': 'منظم الضغط معطوب', 'solution_fr': 'Tester régulateur', 'solution_ar': 'افحص المنظم', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0870': {'desc_fr': 'Circuit capteur pression liquide transmission C', 'desc_ar': 'دائرة حساس ضغط سائل العلبة C', 'cause_fr': 'Capteur pression C', 'cause_ar': 'حساس الضغط C', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0871': {'desc_fr': 'Problème plage capteur pression liquide transmission C', 'desc_ar': 'مشكل في نطاق حساس ضغط السائل C', 'cause_fr': 'Capteur pression C défectueux', 'cause_ar': 'حساس الضغط C تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0872': {'desc_fr': 'Signal bas capteur pression liquide transmission C', 'desc_ar': 'إشارة منخفضة لحساس ضغط السائل C', 'cause_fr': 'Capteur pression C HS', 'cause_ar': 'حساس الضغط C معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0873': {'desc_fr': 'Signal haut capteur pression liquide transmission C', 'desc_ar': 'إشارة عالية لحساس ضغط السائل C', 'cause_fr': 'Capteur pression C défectueux', 'cause_ar': 'حساس الضغط C تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '100-350€', 'categorie': 'Transmission'},
+        'P0874': {'desc_fr': 'Circuit capteur pression liquide transmission C intermittent', 'desc_ar': 'دائرة حساس ضغط السائل C متقطعة', 'cause_fr': 'Capteur pression C, connexion', 'cause_ar': 'حساس الضغط C، التوصيل', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0875': {'desc_fr': 'Circuit solenoïde pression liquide C', 'desc_ar': 'دائرة ملف ضغط السائل C', 'cause_fr': 'Solenoïde pression C', 'cause_ar': 'ملف ضغط السائل C', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0876': {'desc_fr': 'Problème plage solenoïde pression liquide C', 'desc_ar': 'مشكل في نطاق ملف ضغط السائل C', 'cause_fr': 'Solenoïde pression C défectueux', 'cause_ar': 'ملف ضغط السائل C تالف', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0877': {'desc_fr': 'Circuit commande solenoïde pression liquide C bas', 'desc_ar': 'دائرة تحكم ملف ضغط السائل C منخفضة', 'cause_fr': 'Solenoïde pression C HS', 'cause_ar': 'ملف ضغط السائل C معطوب', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0878': {'desc_fr': 'Circuit commande solenoïde pression liquide C haut', 'desc_ar': 'دائرة تحكم ملف ضغط السائل C عالية', 'cause_fr': 'Solenoïde pression C défectueux', 'cause_ar': 'ملف ضغط السائل C تالف', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0879': {'desc_fr': 'Circuit commande solenoïde pression liquide C intermittent', 'desc_ar': 'دائرة تحكم ملف ضغط السائل C متقطعة', 'cause_fr': 'Solenoïde pression C, connexion', 'cause_ar': 'ملف ضغط السائل C، التوصيل', 'solution_fr': 'Tester solenoïde', 'solution_ar': 'افحص الملف', 'prix': '150-600€', 'categorie': 'Transmission'},
+        'P0880': {'desc_fr': 'Circuit alimentation TCM', 'desc_ar': 'دائرة تغذية كمبيوتر علبة السرعة', 'cause_fr': 'Alimentation TCM', 'cause_ar': 'تغذية كمبيوتر العلبة', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0881': {'desc_fr': 'Problème plage alimentation TCM', 'desc_ar': 'مشكل في نطاق تغذية كمبيوتر العلبة', 'cause_fr': 'Alimentation TCM défectueuse', 'cause_ar': 'تغذية كمبيوتر العلبة تالفة', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0882': {'desc_fr': 'Signal bas alimentation TCM', 'desc_ar': 'إشارة منخفضة لتغذية كمبيوتر العلبة', 'cause_fr': 'Alimentation TCM basse', 'cause_ar': 'تغذية كمبيوتر العلبة منخفضة', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0883': {'desc_fr': 'Signal haut alimentation TCM', 'desc_ar': 'إشارة عالية لتغذية كمبيوتر العلبة', 'cause_fr': 'Alimentation TCM haute', 'cause_ar': 'تغذية كمبيوتر العلبة مرتفعة', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0884': {'desc_fr': 'Circuit alimentation TCM intermittent', 'desc_ar': 'دائرة تغذية كمبيوتر العلبة متقطعة', 'cause_fr': 'Alimentation TCM, connexion', 'cause_ar': 'تغذية كمبيوتر العلبة، التوصيل', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Transmission'},
+        'P0885': {'desc_fr': 'Circuit relais alimentation TCM', 'desc_ar': 'دائرة مرحل تغذية كمبيوتر العلبة', 'cause_fr': 'Relais alimentation TCM', 'cause_ar': 'مرحل تغذية كمبيوتر العلبة', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0886': {'desc_fr': 'Circuit relais alimentation TCM bas', 'desc_ar': 'دائرة مرحل تغذية كمبيوتر العلبة منخفضة', 'cause_fr': 'Relais alimentation HS', 'cause_ar': 'مرحل التغذية معطوب', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0887': {'desc_fr': 'Circuit relais alimentation TCM haut', 'desc_ar': 'دائرة مرحل تغذية كمبيوتر العلبة عالية', 'cause_fr': 'Relais alimentation défectueux', 'cause_ar': 'مرحل التغذية تالف', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0888': {'desc_fr': 'Circuit relais alimentation TCM intermittent', 'desc_ar': 'دائرة مرحل تغذية كمبيوتر العلبة متقطعة', 'cause_fr': 'Relais alimentation, connexion', 'cause_ar': 'مرحل التغذية، التوصيل', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0889': {'desc_fr': 'Problème plage relais alimentation TCM', 'desc_ar': 'مشكل في نطاق مرحل تغذية كمبيوتر العلبة', 'cause_fr': 'Relais alimentation défectueux', 'cause_ar': 'مرحل التغذية تالف', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0890': {'desc_fr': 'Circuit relais alimentation TCM', 'desc_ar': 'دائرة مرحل تغذية كمبيوتر العلبة', 'cause_fr': 'Relais alimentation', 'cause_ar': 'مرحل التغذية', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0891': {'desc_fr': 'Circuit relais alimentation TCM bas', 'desc_ar': 'دائرة مرحل تغذية كمبيوتر العلبة منخفضة', 'cause_fr': 'Relais alimentation HS', 'cause_ar': 'مرحل التغذية معطوب', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0892': {'desc_fr': 'Circuit relais alimentation TCM haut', 'desc_ar': 'دائرة مرحل تغذية كمبيوتر العلبة عالية', 'cause_fr': 'Relais alimentation défectueux', 'cause_ar': 'مرحل التغذية تالف', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Transmission'},
+        'P0893': {'desc_fr': 'Performances multiples rapports transmission', 'desc_ar': 'أداء متعدد لنسب علبة السرعة', 'cause_fr': 'Problème transmission', 'cause_ar': 'مشكل في علبة السرعة', 'solution_fr': 'Diagnostiquer transmission', 'solution_ar': 'شخص علبة السرعة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0894': {'desc_fr': 'Glissement éléments transmission', 'desc_ar': 'انزلاق عناصر علبة السرعة', 'cause_fr': 'Embrayages usés', 'cause_ar': 'القوابض مستهلكة', 'solution_fr': 'Tester transmission', 'solution_ar': 'افحص العلبة', 'prix': '300-2000€', 'categorie': 'Transmission'},
+        'P0895': {'desc_fr': 'Temps de changement de rapport', 'desc_ar': 'وقت تغيير النسبة', 'cause_fr': 'Système contrôle défectueux', 'cause_ar': 'نظام التحكم تالف', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0896': {'desc_fr': 'Performances système contrôle rapport', 'desc_ar': 'أداء نظام التحكم في النسبة', 'cause_fr': 'Système contrôle HS', 'cause_ar': 'نظام التحكم معطوب', 'solution_fr': 'Tester système', 'solution_ar': 'افحص النظام', 'prix': '200-1000€', 'categorie': 'Transmission'},
+        'P0897': {'desc_fr': 'Qualité changement de rapport', 'desc_ar': 'جودة تغيير النسبة', 'cause_fr': 'Problème transmission', 'cause_ar': 'مشكل في علبة السرعة', 'solution_fr': 'Diagnostiquer transmission', 'solution_ar': 'شخص علبة السرعة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P0898': {'desc_fr': 'Circuit commande température moteur transmission', 'desc_ar': 'دائرة تحكم حرارة محرك العلبة', 'cause_fr': 'Capteur température, TCM', 'cause_ar': 'حساس الحرارة، كمبيوتر العلبة', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
+        'P0899': {'desc_fr': 'Circuit commande température moteur transmission haut', 'desc_ar': 'دائرة تحكم حرارة محرك العلبة عالية', 'cause_fr': 'Capteur température défectueux', 'cause_ar': 'حساس الحرارة تالف', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '100-400€', 'categorie': 'Transmission'},
     }
     
-    # Si code connu
-    if dtc in specific_db:
-        return specific_db[dtc], True
+    # Si code trouvé dans powertrain_db
+    if dtc in powertrain_db:
+        return powertrain_db[dtc], True
     
-    # Si code INCONNU → Détection par catégorie
+    # ========================================================================
+    # BASE DE DONNÉES COMPLÈTE - CHÂSSIS (C0xxx) - ABS/ESP
+    # ========================================================================
+    chassis_db = {
+        # Wheel Speed Sensors (C00xx)
+        'C0035': {'desc_fr': 'Capteur vitesse roue avant gauche circuit', 'desc_ar': 'دائرة حساس سرعة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG, câblage', 'cause_ar': 'حساس ABS الأمامي الأيسر، أسلاك', 'solution_fr': 'Tester capteur roue AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0036': {'desc_fr': 'Problème plage capteur vitesse roue avant gauche', 'desc_ar': 'مشكل في نطاق حساس سرعة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Remplacer capteur AVG', 'solution_ar': 'استبدل حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0037': {'desc_fr': 'Signal bas capteur vitesse roue avant gauche', 'desc_ar': 'إشارة منخفضة لحساس سرعة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0038': {'desc_fr': 'Signal haut capteur vitesse roue avant gauche', 'desc_ar': 'إشارة عالية لحساس سرعة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Remplacer capteur AVG', 'solution_ar': 'استبدل حساس العجلة الأمامية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0040': {'desc_fr': 'Capteur vitesse roue avant droite circuit', 'desc_ar': 'دائرة حساس سرعة العجلة الأمامية اليمنى', 'cause_fr': 'Capteur ABS AVD, câblage', 'cause_ar': 'حساس ABS الأمامي الأيمن، أسلاك', 'solution_fr': 'Tester capteur roue AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0041': {'desc_fr': 'Problème plage capteur vitesse roue avant droite', 'desc_ar': 'مشكل في نطاق حساس سرعة العجلة الأمامية اليمنى', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Remplacer capteur AVD', 'solution_ar': 'استبدل حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0042': {'desc_fr': 'Signal bas capteur vitesse roue avant droite', 'desc_ar': 'إشارة منخفضة لحساس سرعة العجلة الأمامية اليمنى', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0043': {'desc_fr': 'Signal haut capteur vitesse roue avant droite', 'desc_ar': 'إشارة عالية لحساس سرعة العجلة الأمامية اليمنى', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Remplacer capteur AVD', 'solution_ar': 'استبدل حساس العجلة الأمامية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0045': {'desc_fr': 'Capteur vitesse roue arrière gauche circuit', 'desc_ar': 'دائرة حساس سرعة العجلة الخلفية اليسرى', 'cause_fr': 'Capteur ABS ARG, câblage', 'cause_ar': 'حساس ABS الخلفي الأيسر، أسلاك', 'solution_fr': 'Tester capteur roue ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0046': {'desc_fr': 'Problème plage capteur vitesse roue arrière gauche', 'desc_ar': 'مشكل في نطاق حساس سرعة العجلة الخلفية اليسرى', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Remplacer capteur ARG', 'solution_ar': 'استبدل حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0047': {'desc_fr': 'Signal bas capteur vitesse roue arrière gauche', 'desc_ar': 'إشارة منخفضة لحساس سرعة العجلة الخلفية اليسرى', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0048': {'desc_fr': 'Signal haut capteur vitesse roue arrière gauche', 'desc_ar': 'إشارة عالية لحساس سرعة العجلة الخلفية اليسرى', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Remplacer capteur ARG', 'solution_ar': 'استبدل حساس العجلة الخلفية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0050': {'desc_fr': 'Capteur vitesse roue arrière droite circuit', 'desc_ar': 'دائرة حساس سرعة العجلة الخلفية اليمنى', 'cause_fr': 'Capteur ABS ARD, câblage', 'cause_ar': 'حساس ABS الخلفي الأيمن، أسلاك', 'solution_fr': 'Tester capteur roue ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0051': {'desc_fr': 'Problème plage capteur vitesse roue arrière droite', 'desc_ar': 'مشكل في نطاق حساس سرعة العجلة الخلفية اليمنى', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Remplacer capteur ARD', 'solution_ar': 'استبدل حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0052': {'desc_fr': 'Signal bas capteur vitesse roue arrière droite', 'desc_ar': 'إشارة منخفضة لحساس سرعة العجلة الخلفية اليمنى', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0053': {'desc_fr': 'Signal haut capteur vitesse roue arrière droite', 'desc_ar': 'إشارة عالية لحساس سرعة العجلة الخلفية اليمنى', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Remplacer capteur ARD', 'solution_ar': 'استبدل حساس العجلة الخلفية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        
+        # ABS Pump & Valves (C01xx)
+        'C0110': {'desc_fr': 'Circuit moteur pompe ABS', 'desc_ar': 'دائرة محرك مضخة ABS', 'cause_fr': 'Moteur pompe ABS, relais', 'cause_ar': 'محرك مضخة ABS، مرحل', 'solution_fr': 'Tester pompe ABS', 'solution_ar': 'افحص مضخة ABS', 'prix': '200-600€', 'categorie': 'Pompe ABS'},
+        'C0111': {'desc_fr': 'Performances moteur pompe ABS', 'desc_ar': 'أداء محرك مضخة ABS', 'cause_fr': 'Moteur pompe ABS HS', 'cause_ar': 'محرك مضخة ABS معطوب', 'solution_fr': 'Tester pompe ABS', 'solution_ar': 'افحص مضخة ABS', 'prix': '200-600€', 'categorie': 'Pompe ABS'},
+        'C0121': {'desc_fr': 'Circuit alimentation valves ABS', 'desc_ar': 'دائرة تغذية صمامات ABS', 'cause_fr': 'Valves ABS, câblage', 'cause_ar': 'صمامات ABS، أسلاك', 'solution_fr': 'Tester valves ABS', 'solution_ar': 'افحص صمامات ABS', 'prix': '300-800€', 'categorie': 'Valves ABS'},
+        'C0122': {'desc_fr': 'Circuit valve ABS avant gauche', 'desc_ar': 'دائرة صمام ABS الأمامي الأيسر', 'cause_fr': 'Valve ABS AVG', 'cause_ar': 'صمام ABS الأمامي الأيسر', 'solution_fr': 'Tester valve AVG', 'solution_ar': 'افحص صمام العجلة الأمامية اليسرى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0123': {'desc_fr': 'Circuit valve ABS avant droite', 'desc_ar': 'دائرة صمام ABS الأمامي الأيمن', 'cause_fr': 'Valve ABS AVD', 'cause_ar': 'صمام ABS الأمامي الأيمن', 'solution_fr': 'Tester valve AVD', 'solution_ar': 'افحص صمام العجلة الأمامية اليمنى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0124': {'desc_fr': 'Circuit valve ABS arrière gauche', 'desc_ar': 'دائرة صمام ABS الخلفي الأيسر', 'cause_fr': 'Valve ABS ARG', 'cause_ar': 'صمام ABS الخلفي الأيسر', 'solution_fr': 'Tester valve ARG', 'solution_ar': 'افحص صمام العجلة الخلفية اليسرى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0125': {'desc_fr': 'Circuit valve ABS arrière droite', 'desc_ar': 'دائرة صمام ABS الخلفي الأيمن', 'cause_fr': 'Valve ABS ARD', 'cause_ar': 'صمام ABS الخلفي الأيمن', 'solution_fr': 'Tester valve ARD', 'solution_ar': 'افحص صمام العجلة الخلفية اليمنى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0128': {'desc_fr': 'Circuit relais pompe ABS', 'desc_ar': 'دائرة مرحل مضخة ABS', 'cause_fr': 'Relais pompe ABS', 'cause_ar': 'مرحل مضخة ABS', 'solution_fr': 'Tester relais', 'solution_ar': 'افحص المرحل', 'prix': '50-200€', 'categorie': 'Pompe ABS'},
+        'C0131': {'desc_fr': 'Circuit valve ABS avant gauche bas', 'desc_ar': 'دائرة صمام ABS الأمامي الأيسر منخفضة', 'cause_fr': 'Valve ABS AVG HS', 'cause_ar': 'صمام ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester valve AVG', 'solution_ar': 'افحص صمام العجلة الأمامية اليسرى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0132': {'desc_fr': 'Circuit valve ABS avant gauche haut', 'desc_ar': 'دائرة صمام ABS الأمامي الأيسر عالية', 'cause_fr': 'Valve ABS AVG défectueuse', 'cause_ar': 'صمام ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester valve AVG', 'solution_ar': 'افحص صمام العجلة الأمامية اليسرى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0141': {'desc_fr': 'Dysfonctionnement système ABS', 'desc_ar': 'خلل في نظام ABS', 'cause_fr': 'Module ABS, capteurs', 'cause_ar': 'موديول ABS، الحساسات', 'solution_fr': 'Diagnostiquer ABS', 'solution_ar': 'شخص نظام ABS', 'prix': '150-1000€', 'categorie': 'Système ABS'},
+        'C0142': {'desc_fr': 'Circuit valve ABS avant droite bas', 'desc_ar': 'دائرة صمام ABS الأمامي الأيمن منخفضة', 'cause_fr': 'Valve ABS AVD HS', 'cause_ar': 'صمام ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester valve AVD', 'solution_ar': 'افحص صمام العجلة الأمامية اليمنى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0143': {'desc_fr': 'Circuit valve ABS avant droite haut', 'desc_ar': 'دائرة صمام ABS الأمامي الأيمن عالية', 'cause_fr': 'Valve ABS AVD défectueuse', 'cause_ar': 'صمام ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester valve AVD', 'solution_ar': 'افحص صمام العجلة الأمامية اليمنى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0151': {'desc_fr': 'Circuit valve ABS arrière gauche bas', 'desc_ar': 'دائرة صمام ABS الخلفي الأيسر منخفضة', 'cause_fr': 'Valve ABS ARG HS', 'cause_ar': 'صمام ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester valve ARG', 'solution_ar': 'افحص صمام العجلة الخلفية اليسرى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0152': {'desc_fr': 'Circuit valve ABS arrière gauche haut', 'desc_ar': 'دائرة صمام ABS الخلفي الأيسر عالية', 'cause_fr': 'Valve ABS ARG défectueuse', 'cause_ar': 'صمام ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester valve ARG', 'solution_ar': 'افحص صمام العجلة الخلفية اليسرى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0161': {'desc_fr': 'Circuit valve ABS arrière droite bas', 'desc_ar': 'دائرة صمام ABS الخلفي الأيمن منخفضة', 'cause_fr': 'Valve ABS ARD HS', 'cause_ar': 'صمام ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester valve ARD', 'solution_ar': 'افحص صمام العجلة الخلفية اليمنى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        'C0162': {'desc_fr': 'Circuit valve ABS arrière droite haut', 'desc_ar': 'دائرة صمام ABS الخلفي الأيمن عالية', 'cause_fr': 'Valve ABS ARD défectueuse', 'cause_ar': 'صمام ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester valve ARD', 'solution_ar': 'افحص صمام العجلة الخلفية اليمنى', 'prix': '150-500€', 'categorie': 'Valves ABS'},
+        
+        # ABS Module & Communication (C02xx)
+        'C0200': {'desc_fr': 'Signal roue avant gauche', 'desc_ar': 'إشارة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG, roue phonique', 'cause_ar': 'حساس ABS الأمامي الأيسر، العجلة المسننة', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0210': {'desc_fr': 'Signal roue arrière droite', 'desc_ar': 'إشارة العجلة الخلفية اليمنى', 'cause_fr': 'Capteur ABS ARD, roue phonique', 'cause_ar': 'حساس ABS الخلفي الأيمن، العجلة المسننة', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0221': {'desc_fr': 'Circuit capteur roue avant droite', 'desc_ar': 'دائرة حساس العجلة الأمامية اليمنى', 'cause_fr': 'Capteur ABS AVD', 'cause_ar': 'حساس ABS الأمامي الأيمن', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0222': {'desc_fr': 'Signal roue avant droite', 'desc_ar': 'إشارة العجلة الأمامية اليمنى', 'cause_fr': 'Capteur ABS AVD, roue phonique', 'cause_ar': 'حساس ABS الأمامي الأيمن، العجلة المسننة', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0223': {'desc_fr': 'Signal roue avant droite intermittent', 'desc_ar': 'إشارة العجلة الأمامية اليمنى متقطعة', 'cause_fr': 'Capteur ABS AVD, connexion', 'cause_ar': 'حساس ABS الأمامي الأيمن، التوصيل', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0224': {'desc_fr': 'Signal roue avant droite manquant', 'desc_ar': 'إشارة العجلة الأمامية اليمنى مفقودة', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Remplacer capteur AVD', 'solution_ar': 'استبدل حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0225': {'desc_fr': 'Signal roue avant droite excessif', 'desc_ar': 'إشارة العجلة الأمامية اليمنى مفرطة', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0226': {'desc_fr': 'Signal roue avant droite insuffisant', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير كافية', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0227': {'desc_fr': 'Signal roue avant droite permanent', 'desc_ar': 'إشارة العجلة الأمامية اليمنى دائمة', 'cause_fr': 'Capteur ABS AVD bloqué', 'cause_ar': 'حساس ABS الأمامي الأيمن عالق', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0228': {'desc_fr': 'Signal roue avant droite bas', 'desc_ar': 'إشارة العجلة الأمامية اليمنى منخفضة', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0229': {'desc_fr': 'Signal roue avant droite haut', 'desc_ar': 'إشارة العجلة الأمامية اليمنى عالية', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0230': {'desc_fr': 'Signal roue avant droite erratique', 'desc_ar': 'إشارة العجلة الأمامية اليمنى عشوائية', 'cause_fr': 'Capteur ABS AVD, roue phonique', 'cause_ar': 'حساس ABS الأمامي الأيمن، العجلة المسننة', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0231': {'desc_fr': 'Signal roue avant droite anormal', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير طبيعية', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0232': {'desc_fr': 'Signal roue avant droite invalide', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0233': {'desc_fr': 'Signal roue avant droite incohérent', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير متسقة', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0234': {'desc_fr': 'Signal roue avant droite incorrect', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير صحيحة', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0235': {'desc_fr': 'Signal roue avant droite invalide', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0236': {'desc_fr': 'Signal roue avant droite incorrect', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير صحيحة', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0237': {'desc_fr': 'Signal roue avant droite invalide', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0238': {'desc_fr': 'Signal roue avant droite incorrect', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير صحيحة', 'cause_fr': 'Capteur ABS AVD HS', 'cause_ar': 'حساس ABS الأمامي الأيمن معطوب', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0239': {'desc_fr': 'Signal roue avant droite invalide', 'desc_ar': 'إشارة العجلة الأمامية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS AVD défectueux', 'cause_ar': 'حساس ABS الأمامي الأيمن تالف', 'solution_fr': 'Tester capteur AVD', 'solution_ar': 'افحص حساس العجلة الأمامية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0240': {'desc_fr': 'Signal roue avant gauche', 'desc_ar': 'إشارة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG, roue phonique', 'cause_ar': 'حساس ABS الأمامي الأيسر، العجلة المسننة', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0241': {'desc_fr': 'Signal roue avant gauche intermittent', 'desc_ar': 'إشارة العجلة الأمامية اليسرى متقطعة', 'cause_fr': 'Capteur ABS AVG, connexion', 'cause_ar': 'حساس ABS الأمامي الأيسر، التوصيل', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0242': {'desc_fr': 'Signal roue avant gauche manquant', 'desc_ar': 'إشارة العجلة الأمامية اليسرى مفقودة', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Remplacer capteur AVG', 'solution_ar': 'استبدل حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0243': {'desc_fr': 'Signal roue avant gauche excessif', 'desc_ar': 'إشارة العجلة الأمامية اليسرى مفرطة', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0244': {'desc_fr': 'Signal roue avant gauche insuffisant', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير كافية', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0245': {'desc_fr': 'Signal roue avant gauche permanent', 'desc_ar': 'إشارة العجلة الأمامية اليسرى دائمة', 'cause_fr': 'Capteur ABS AVG bloqué', 'cause_ar': 'حساس ABS الأمامي الأيسر عالق', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0246': {'desc_fr': 'Signal roue avant gauche bas', 'desc_ar': 'إشارة العجلة الأمامية اليسرى منخفضة', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0247': {'desc_fr': 'Signal roue avant gauche haut', 'desc_ar': 'إشارة العجلة الأمامية اليسرى عالية', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0248': {'desc_fr': 'Signal roue avant gauche erratique', 'desc_ar': 'إشارة العجلة الأمامية اليسرى عشوائية', 'cause_fr': 'Capteur ABS AVG, roue phonique', 'cause_ar': 'حساس ABS الأمامي الأيسر، العجلة المسننة', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0249': {'desc_fr': 'Signal roue avant gauche anormal', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير طبيعية', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0250': {'desc_fr': 'Signal roue avant gauche invalide', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0251': {'desc_fr': 'Signal roue avant gauche incohérent', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير متسقة', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0252': {'desc_fr': 'Signal roue avant gauche incorrect', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0253': {'desc_fr': 'Signal roue avant gauche invalide', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0254': {'desc_fr': 'Signal roue avant gauche incorrect', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0255': {'desc_fr': 'Signal roue avant gauche invalide', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0256': {'desc_fr': 'Signal roue avant gauche incorrect', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0257': {'desc_fr': 'Signal roue avant gauche invalide', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0258': {'desc_fr': 'Signal roue avant gauche incorrect', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS AVG HS', 'cause_ar': 'حساس ABS الأمامي الأيسر معطوب', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0259': {'desc_fr': 'Signal roue avant gauche invalide', 'desc_ar': 'إشارة العجلة الأمامية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS AVG défectueux', 'cause_ar': 'حساس ABS الأمامي الأيسر تالف', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة الأمامية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0260': {'desc_fr': 'Signal roue arrière gauche', 'desc_ar': 'إشارة العجلة الخلفية اليسرى', 'cause_fr': 'Capteur ABS ARG, roue phonique', 'cause_ar': 'حساس ABS الخلفي الأيسر، العجلة المسننة', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0261': {'desc_fr': 'Signal roue arrière gauche intermittent', 'desc_ar': 'إشارة العجلة الخلفية اليسرى متقطعة', 'cause_fr': 'Capteur ABS ARG, connexion', 'cause_ar': 'حساس ABS الخلفي الأيسر، التوصيل', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0262': {'desc_fr': 'Signal roue arrière gauche manquant', 'desc_ar': 'إشارة العجلة الخلفية اليسرى مفقودة', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Remplacer capteur ARG', 'solution_ar': 'استبدل حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0263': {'desc_fr': 'Signal roue arrière gauche excessif', 'desc_ar': 'إشارة العجلة الخلفية اليسرى مفرطة', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0264': {'desc_fr': 'Signal roue arrière gauche insuffisant', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير كافية', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0265': {'desc_fr': 'Signal roue arrière gauche permanent', 'desc_ar': 'إشارة العجلة الخلفية اليسرى دائمة', 'cause_fr': 'Capteur ABS ARG bloqué', 'cause_ar': 'حساس ABS الخلفي الأيسر عالق', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0266': {'desc_fr': 'Signal roue arrière gauche bas', 'desc_ar': 'إشارة العجلة الخلفية اليسرى منخفضة', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0267': {'desc_fr': 'Signal roue arrière gauche haut', 'desc_ar': 'إشارة العجلة الخلفية اليسرى عالية', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0268': {'desc_fr': 'Signal roue arrière gauche erratique', 'desc_ar': 'إشارة العجلة الخلفية اليسرى عشوائية', 'cause_fr': 'Capteur ABS ARG, roue phonique', 'cause_ar': 'حساس ABS الخلفي الأيسر، العجلة المسننة', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0269': {'desc_fr': 'Signal roue arrière gauche anormal', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير طبيعية', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0270': {'desc_fr': 'Signal roue arrière gauche invalide', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0271': {'desc_fr': 'Signal roue arrière gauche incohérent', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير متسقة', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0272': {'desc_fr': 'Signal roue arrière gauche incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0273': {'desc_fr': 'Signal roue arrière gauche invalide', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0274': {'desc_fr': 'Signal roue arrière gauche incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0275': {'desc_fr': 'Signal roue arrière gauche invalide', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0276': {'desc_fr': 'Signal roue arrière gauche incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0277': {'desc_fr': 'Signal roue arrière gauche invalide', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0278': {'desc_fr': 'Signal roue arrière gauche incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صحيحة', 'cause_fr': 'Capteur ABS ARG HS', 'cause_ar': 'حساس ABS الخلفي الأيسر معطوب', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0279': {'desc_fr': 'Signal roue arrière gauche invalide', 'desc_ar': 'إشارة العجلة الخلفية اليسرى غير صالحة', 'cause_fr': 'Capteur ABS ARG défectueux', 'cause_ar': 'حساس ABS الخلفي الأيسر تالف', 'solution_fr': 'Tester capteur ARG', 'solution_ar': 'افحص حساس العجلة الخلفية اليسرى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0280': {'desc_fr': 'Signal roue arrière droite', 'desc_ar': 'إشارة العجلة الخلفية اليمنى', 'cause_fr': 'Capteur ABS ARD, roue phonique', 'cause_ar': 'حساس ABS الخلفي الأيمن، العجلة المسننة', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0281': {'desc_fr': 'Signal roue arrière droite intermittent', 'desc_ar': 'إشارة العجلة الخلفية اليمنى متقطعة', 'cause_fr': 'Capteur ABS ARD, connexion', 'cause_ar': 'حساس ABS الخلفي الأيمن، التوصيل', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0282': {'desc_fr': 'Signal roue arrière droite manquant', 'desc_ar': 'إشارة العجلة الخلفية اليمنى مفقودة', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Remplacer capteur ARD', 'solution_ar': 'استبدل حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0283': {'desc_fr': 'Signal roue arrière droite excessif', 'desc_ar': 'إشارة العجلة الخلفية اليمنى مفرطة', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0284': {'desc_fr': 'Signal roue arrière droite insuffisant', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير كافية', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0285': {'desc_fr': 'Signal roue arrière droite permanent', 'desc_ar': 'إشارة العجلة الخلفية اليمنى دائمة', 'cause_fr': 'Capteur ABS ARD bloqué', 'cause_ar': 'حساس ABS الخلفي الأيمن عالق', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0286': {'desc_fr': 'Signal roue arrière droite bas', 'desc_ar': 'إشارة العجلة الخلفية اليمنى منخفضة', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0287': {'desc_fr': 'Signal roue arrière droite haut', 'desc_ar': 'إشارة العجلة الخلفية اليمنى عالية', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-250€', 'categorie': 'Capteur ABS'},
+        'C0288': {'desc_fr': 'Signal roue arrière droite erratique', 'desc_ar': 'إشارة العجلة الخلفية اليمنى عشوائية', 'cause_fr': 'Capteur ABS ARD, roue phonique', 'cause_ar': 'حساس ABS الخلفي الأيمن، العجلة المسننة', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-350€', 'categorie': 'Signal ABS'},
+        'C0289': {'desc_fr': 'Signal roue arrière droite anormal', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير طبيعية', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0290': {'desc_fr': 'Signal roue arrière droite invalide', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0291': {'desc_fr': 'Signal roue arrière droite incohérent', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير متسقة', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0292': {'desc_fr': 'Signal roue arrière droite incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صحيحة', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0293': {'desc_fr': 'Signal roue arrière droite invalide', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0294': {'desc_fr': 'Signal roue arrière droite incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صحيحة', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0295': {'desc_fr': 'Signal roue arrière droite invalide', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0296': {'desc_fr': 'Signal roue arrière droite incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صحيحة', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0297': {'desc_fr': 'Signal roue arrière droite invalide', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0298': {'desc_fr': 'Signal roue arrière droite incorrect', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صحيحة', 'cause_fr': 'Capteur ABS ARD HS', 'cause_ar': 'حساس ABS الخلفي الأيمن معطوب', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        'C0299': {'desc_fr': 'Signal roue arrière droite invalide', 'desc_ar': 'إشارة العجلة الخلفية اليمنى غير صالحة', 'cause_fr': 'Capteur ABS ARD défectueux', 'cause_ar': 'حساس ABS الخلفي الأيمن تالف', 'solution_fr': 'Tester capteur ARD', 'solution_ar': 'افحص حساس العجلة الخلفية اليمنى', 'prix': '100-300€', 'categorie': 'Capteur ABS'},
+        
+        # ABS System (C05xx)
+        'C0550': {'desc_fr': 'Module ABS défectueux', 'desc_ar': 'موديول ABS معطوب', 'cause_fr': 'Module ABS HS', 'cause_ar': 'موديول ABS تالف', 'solution_fr': 'Remplacer module ABS', 'solution_ar': 'استبدل موديول ABS', 'prix': '300-1500€', 'categorie': 'Module ABS'},
+        'C0551': {'desc_fr': 'Problème calibration module ABS', 'desc_ar': 'مشكل في معايرة موديول ABS', 'cause_fr': 'Module ABS non calibré', 'cause_ar': 'موديول ABS غير معاير', 'solution_fr': 'Calibrer module ABS', 'solution_ar': 'عاير موديول ABS', 'prix': '100-500€', 'categorie': 'Module ABS'},
+        'C0552': {'desc_fr': 'Problème alimentation module ABS', 'desc_ar': 'مشكل في تغذية موديول ABS', 'cause_fr': 'Alimentation module ABS', 'cause_ar': 'تغذية موديول ABS', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Module ABS'},
+        'C0553': {'desc_fr': 'Problème masse module ABS', 'desc_ar': 'مشكل في أرضي موديول ABS', 'cause_fr': 'Masse module ABS', 'cause_ar': 'أرضي موديول ABS', 'solution_fr': 'Tester masse', 'solution_ar': 'افحص الأرضي', 'prix': '50-200€', 'categorie': 'Module ABS'},
+        'C0554': {'desc_fr': 'Problème communication module ABS', 'desc_ar': 'مشكل في اتصال موديول ABS', 'cause_fr': 'Communication CAN, module ABS', 'cause_ar': 'اتصال CAN، موديول ABS', 'solution_fr': 'Tester communication', 'solution_ar': 'افحص الاتصال', 'prix': '150-600€', 'categorie': 'Module ABS'},
+        'C0555': {'desc_fr': 'Problème température module ABS', 'desc_ar': 'مشكل في حرارة موديول ABS', 'cause_fr': 'Module ABS surchauffe', 'cause_ar': 'موديول ABS يسخن', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0556': {'desc_fr': 'Problème voltage module ABS', 'desc_ar': 'مشكل في جهد موديول ABS', 'cause_fr': 'Voltage module ABS incorrect', 'cause_ar': 'جهد موديول ABS غير صحيح', 'solution_fr': 'Tester alimentation', 'solution_ar': 'افحص التغذية', 'prix': '100-500€', 'categorie': 'Module ABS'},
+        'C0557': {'desc_fr': 'Problème courant module ABS', 'desc_ar': 'مشكل في تيار موديول ABS', 'cause_fr': 'Courant module ABS incorrect', 'cause_ar': 'تيار موديول ABS غير صحيح', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0558': {'desc_fr': 'Problème fréquence module ABS', 'desc_ar': 'مشكل في تردد موديول ABS', 'cause_fr': 'Fréquence module ABS incorrecte', 'cause_ar': 'تردد موديول ABS غير صحيح', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0559': {'desc_fr': 'Problème horloge module ABS', 'desc_ar': 'مشكل في ساعة موديول ABS', 'cause_fr': 'Horloge module ABS défectueuse', 'cause_ar': 'ساعة موديول ABS تالفة', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0560': {'desc_fr': 'Problème mémoire module ABS', 'desc_ar': 'مشكل في ذاكرة موديول ABS', 'cause_fr': 'Mémoire module ABS corrompue', 'cause_ar': 'ذاكرة موديول ABS تالفة', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0561': {'desc_fr': 'Problème processeur module ABS', 'desc_ar': 'مشكل في معالج موديول ABS', 'cause_fr': 'Processeur module ABS HS', 'cause_ar': 'معالج موديول ABS معطوب', 'solution_fr': 'Remplacer module ABS', 'solution_ar': 'استبدل موديول ABS', 'prix': '300-1500€', 'categorie': 'Module ABS'},
+        'C0562': {'desc_fr': 'Problème logiciel module ABS', 'desc_ar': 'مشكل في برمجية موديول ABS', 'cause_fr': 'Logiciel module ABS corrompu', 'cause_ar': 'برمجية موديول ABS تالفة', 'solution_fr': 'Reprogrammer module ABS', 'solution_ar': 'أعد برمجة موديول ABS', 'prix': '150-600€', 'categorie': 'Module ABS'},
+        'C0563': {'desc_fr': 'Problème configuration module ABS', 'desc_ar': 'مشكل في إعدادات موديول ABS', 'cause_fr': 'Configuration module ABS incorrecte', 'cause_ar': 'إعدادات موديول ABS غير صحيحة', 'solution_fr': 'Configurer module ABS', 'solution_ar': 'اضبط موديول ABS', 'prix': '100-500€', 'categorie': 'Module ABS'},
+        'C0564': {'desc_fr': 'Problème sécurité module ABS', 'desc_ar': 'مشكل في أمان موديول ABS', 'cause_fr': 'Sécurité module ABS activée', 'cause_ar': 'أمان موديول ABS مفعل', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0565': {'desc_fr': 'Problème diagnostic module ABS', 'desc_ar': 'مشكل في تشخيص موديول ABS', 'cause_fr': 'Diagnostic module ABS impossible', 'cause_ar': 'تشخيص موديول ABS مستحيل', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0566': {'desc_fr': 'Problème initialisation module ABS', 'desc_ar': 'مشكل في تهيئة موديول ABS', 'cause_fr': 'Initialisation module ABS échouée', 'cause_ar': 'تهيئة موديول ABS فشلت', 'solution_fr': 'Réinitialiser module ABS', 'solution_ar': 'أعد تهيئة موديول ABS', 'prix': '100-500€', 'categorie': 'Module ABS'},
+        'C0567': {'desc_fr': 'Problème démarrage module ABS', 'desc_ar': 'مشكل في بدء موديول ABS', 'cause_fr': 'Démarrage module ABS échoué', 'cause_ar': 'بدء موديول ABS فشل', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0568': {'desc_fr': 'Problème arrêt module ABS', 'desc_ar': 'مشكل في إيقاف موديول ABS', 'cause_fr': 'Arrêt module ABS échoué', 'cause_ar': 'إيقاف موديول ABS فشل', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0569': {'desc_fr': 'Problème redémarrage module ABS', 'desc_ar': 'مشكل في إعادة بدء موديول ABS', 'cause_fr': 'Redémarrage module ABS échoué', 'cause_ar': 'إعادة بدء موديول ABS فشلت', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Module ABS'},
+        'C0570': {'desc_fr': 'Problème réinitialisation module ABS', 'desc_ar': 'مشكل في إعادة ضبط موديول ABS', 'cause_fr': 'Réinitialisation module ABS échouée', 'cause_ar': 'إعادة ضبط موديول ABS فشلت', 'solution_fr': 'Réinitialiser module ABS', 'solution_ar': 'أعد ضبط موديول ABS', 'prix': '100-500€', 'categorie': 'Module ABS'},
+        
+        # ESP/Traction Control (C12xx)
+        'C1200': {'desc_fr': 'Circuit capteur accélération latérale', 'desc_ar': 'دائرة حساس التسارع الجانبي', 'cause_fr': 'Capteur accélération latérale', 'cause_ar': 'حساس التسارع الجانبي', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '150-500€', 'categorie': 'Capteur ESP'},
+        'C1201': {'desc_fr': 'Problème plage capteur accélération latérale', 'desc_ar': 'مشكل في نطاق حساس التسارع الجانبي', 'cause_fr': 'Capteur accélération latérale défectueux', 'cause_ar': 'حساس التسارع الجانبي تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '150-500€', 'categorie': 'Capteur ESP'},
+        'C1202': {'desc_fr': 'Signal bas capteur accélération latérale', 'desc_ar': 'إشارة منخفضة لحساس التسارع الجانبي', 'cause_fr': 'Capteur accélération latérale HS', 'cause_ar': 'حساس التسارع الجانبي معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '150-450€', 'categorie': 'Capteur ESP'},
+        'C1203': {'desc_fr': 'Signal haut capteur accélération latérale', 'desc_ar': 'إشارة عالية لحساس التسارع الجانبي', 'cause_fr': 'Capteur accélération latérale défectueux', 'cause_ar': 'حساس التسارع الجانبي تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '150-450€', 'categorie': 'Capteur ESP'},
+        'C1210': {'desc_fr': 'Circuit capteur accélération longitudinale', 'desc_ar': 'دائرة حساس التسارع الطولي', 'cause_fr': 'Capteur accélération longitudinale', 'cause_ar': 'حساس التسارع الطولي', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '150-500€', 'categorie': 'Capteur ESP'},
+        'C1211': {'desc_fr': 'Problème plage capteur accélération longitudinale', 'desc_ar': 'مشكل في نطاق حساس التسارع الطولي', 'cause_fr': 'Capteur accélération longitudinale défectueux', 'cause_ar': 'حساس التسارع الطولي تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '150-500€', 'categorie': 'Capteur ESP'},
+        'C1212': {'desc_fr': 'Signal bas capteur accélération longitudinale', 'desc_ar': 'إشارة منخفضة لحساس التسارع الطولي', 'cause_fr': 'Capteur accélération longitudinale HS', 'cause_ar': 'حساس التسارع الطولي معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '150-450€', 'categorie': 'Capteur ESP'},
+        'C1213': {'desc_fr': 'Signal haut capteur accélération longitudinale', 'desc_ar': 'إشارة عالية لحساس التسارع الطولي', 'cause_fr': 'Capteur accélération longitudinale défectueux', 'cause_ar': 'حساس التسارع الطولي تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '150-450€', 'categorie': 'Capteur ESP'},
+        'C1220': {'desc_fr': 'Circuit capteur angle volant', 'desc_ar': 'دائرة حساس زاوية المقود', 'cause_fr': 'Capteur angle volant, câblage', 'cause_ar': 'حساس زاوية المقود، أسلاك', 'solution_fr': 'Tester capteur angle', 'solution_ar': 'افحص حساس الزاوية', 'prix': '200-600€', 'categorie': 'Capteur ESP'},
+        'C1221': {'desc_fr': 'Problème plage capteur angle volant', 'desc_ar': 'مشكل في نطاق حساس زاوية المقود', 'cause_fr': 'Capteur angle volant défectueux', 'cause_ar': 'حساس زاوية المقود تالف', 'solution_fr': 'Calibrer/remplacer capteur', 'solution_ar': 'عاير أو استبدل الحساس', 'prix': '200-600€', 'categorie': 'Capteur ESP'},
+        'C1222': {'desc_fr': 'Signal bas capteur angle volant', 'desc_ar': 'إشارة منخفضة لحساس زاوية المقود', 'cause_fr': 'Capteur angle volant HS', 'cause_ar': 'حساس زاوية المقود معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '200-550€', 'categorie': 'Capteur ESP'},
+        'C1223': {'desc_fr': 'Signal haut capteur angle volant', 'desc_ar': 'إشارة عالية لحساس زاوية المقود', 'cause_fr': 'Capteur angle volant défectueux', 'cause_ar': 'حساس زاوية المقود تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '200-550€', 'categorie': 'Capteur ESP'},
+        'C1230': {'desc_fr': 'Circuit capteur vitesse de lacet', 'desc_ar': 'دائرة حساس سرعة الانعراج', 'cause_fr': 'Capteur vitesse de lacet', 'cause_ar': 'حساس سرعة الانعراج', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '200-600€', 'categorie': 'Capteur ESP'},
+        'C1231': {'desc_fr': 'Problème plage capteur vitesse de lacet', 'desc_ar': 'مشكل في نطاق حساس سرعة الانعراج', 'cause_fr': 'Capteur vitesse de lacet défectueux', 'cause_ar': 'حساس سرعة الانعراج تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '200-600€', 'categorie': 'Capteur ESP'},
+        'C1232': {'desc_fr': 'Signal bas capteur vitesse de lacet', 'desc_ar': 'إشارة منخفضة لحساس سرعة الانعراج', 'cause_fr': 'Capteur vitesse de lacet HS', 'cause_ar': 'حساس سرعة الانعراج معطوب', 'solution_fr': 'Tester capteur', 'solution_ar': 'افحص الحساس', 'prix': '200-550€', 'categorie': 'Capteur ESP'},
+        'C1233': {'desc_fr': 'Signal haut capteur vitesse de lacet', 'desc_ar': 'إشارة عالية لحساس سرعة الانعراج', 'cause_fr': 'Capteur vitesse de lacet défectueux', 'cause_ar': 'حساس سرعة الانعراج تالف', 'solution_fr': 'Remplacer capteur', 'solution_ar': 'استبدل الحساس', 'prix': '200-550€', 'categorie': 'Capteur ESP'},
+        'C1240': {'desc_fr': 'Circuit solenoïde ESP', 'desc_ar': 'دائرة ملف ESP', 'cause_fr': 'Solenoïde ESP, câblage', 'cause_ar': 'ملف ESP، أسلاك', 'solution_fr': 'Tester solenoïde ESP', 'solution_ar': 'افحص ملف ESP', 'prix': '200-800€', 'categorie': 'Système ESP'},
+        'C1241': {'desc_fr': 'Performances solenoïde ESP', 'desc_ar': 'أداء ملف ESP', 'cause_fr': 'Solenoïde ESP défectueux', 'cause_ar': 'ملف ESP تالف', 'solution_fr': 'Tester solenoïde ESP', 'solution_ar': 'افحص ملف ESP', 'prix': '200-800€', 'categorie': 'Système ESP'},
+        'C1242': {'desc_fr': 'Circuit commande solenoïde ESP bas', 'desc_ar': 'دائرة تحكم ملف ESP منخفضة', 'cause_fr': 'Solenoïde ESP HS', 'cause_ar': 'ملف ESP معطوب', 'solution_fr': 'Tester solenoïde ESP', 'solution_ar': 'افحص ملف ESP', 'prix': '200-750€', 'categorie': 'Système ESP'},
+        'C1243': {'desc_fr': 'Circuit commande solenoïde ESP haut', 'desc_ar': 'دائرة تحكم ملف ESP عالية', 'cause_fr': 'Solenoïde ESP défectueux', 'cause_ar': 'ملف ESP تالف', 'solution_fr': 'Tester solenoïde ESP', 'solution_ar': 'افحص ملف ESP', 'prix': '200-750€', 'categorie': 'Système ESP'},
+        'C1250': {'desc_fr': 'Circuit pompe ESP', 'desc_ar': 'دائرة مضخة ESP', 'cause_fr': 'Pompe ESP, relais', 'cause_ar': 'مضخة ESP، مرحل', 'solution_fr': 'Tester pompe ESP', 'solution_ar': 'افحص مضخة ESP', 'prix': '300-1200€', 'categorie': 'Système ESP'},
+        'C1251': {'desc_fr': 'Performances pompe ESP', 'desc_ar': 'أداء مضخة ESP', 'cause_fr': 'Pompe ESP défectueuse', 'cause_ar': 'مضخة ESP تالفة', 'solution_fr': 'Tester pompe ESP', 'solution_ar': 'افحص مضخة ESP', 'prix': '300-1200€', 'categorie': 'Système ESP'},
+        'C1252': {'desc_fr': 'Circuit commande pompe ESP bas', 'desc_ar': 'دائرة تحكم مضخة ESP منخفضة', 'cause_fr': 'Pompe ESP HS', 'cause_ar': 'مضخة ESP معطوبة', 'solution_fr': 'Tester pompe ESP', 'solution_ar': 'افحص مضخة ESP', 'prix': '300-1150€', 'categorie': 'Système ESP'},
+        'C1253': {'desc_fr': 'Circuit commande pompe ESP haut', 'desc_ar': 'دائرة تحكم مضخة ESP عالية', 'cause_fr': 'Pompe ESP défectueuse', 'cause_ar': 'مضخة ESP تالفة', 'solution_fr': 'Tester pompe ESP', 'solution_ar': 'افحص مضخة ESP', 'prix': '300-1150€', 'categorie': 'Système ESP'},
+        'C1260': {'desc_fr': 'Dysfonctionnement système ESP', 'desc_ar': 'خلل في نظام ESP', 'cause_fr': 'Module ESP, capteurs', 'cause_ar': 'موديول ESP، الحساسات', 'solution_fr': 'Diagnostiquer ESP', 'solution_ar': 'شخص نظام ESP', 'prix': '200-1500€', 'categorie': 'Système ESP'},
+        'C1261': {'desc_fr': 'Problème calibration ESP', 'desc_ar': 'مشكل في معايرة ESP', 'cause_fr': 'ESP non calibré', 'cause_ar': 'ESP غير معاير', 'solution_fr': 'Calibrer ESP', 'solution_ar': 'عاير نظام ESP', 'prix': '100-500€', 'categorie': 'Système ESP'},
+        'C1262': {'desc_fr': 'Problème alimentation ESP', 'desc_ar': 'مشكل في تغذية ESP', 'cause_fr': 'Alimentation ESP', 'cause_ar': 'تغذية ESP', 'solution_fr': 'Tester alimentation ESP', 'solution_ar': 'افحص تغذية ESP', 'prix': '100-500€', 'categorie': 'Système ESP'},
+        'C1263': {'desc_fr': 'Problème masse ESP', 'desc_ar': 'مشكل في أرضي ESP', 'cause_fr': 'Masse ESP', 'cause_ar': 'أرضي ESP', 'solution_fr': 'Tester masse ESP', 'solution_ar': 'افحص أرضي ESP', 'prix': '50-200€', 'categorie': 'Système ESP'},
+        'C1264': {'desc_fr': 'Problème communication ESP', 'desc_ar': 'مشكل في اتصال ESP', 'cause_fr': 'Communication CAN, ESP', 'cause_ar': 'اتصال CAN، ESP', 'solution_fr': 'Tester communication ESP', 'solution_ar': 'افحص اتصال ESP', 'prix': '150-600€', 'categorie': 'Système ESP'},
+        'C1265': {'desc_fr': 'Problème température ESP', 'desc_ar': 'مشكل في حرارة ESP', 'cause_fr': 'ESP surchauffe', 'cause_ar': 'ESP يسخن', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1266': {'desc_fr': 'Problème voltage ESP', 'desc_ar': 'مشكل في جهد ESP', 'cause_fr': 'Voltage ESP incorrect', 'cause_ar': 'جهد ESP غير صحيح', 'solution_fr': 'Tester alimentation ESP', 'solution_ar': 'افحص تغذية ESP', 'prix': '100-500€', 'categorie': 'Système ESP'},
+        'C1267': {'desc_fr': 'Problème courant ESP', 'desc_ar': 'مشكل في تيار ESP', 'cause_fr': 'Courant ESP incorrect', 'cause_ar': 'تيار ESP غير صحيح', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1268': {'desc_fr': 'Problème fréquence ESP', 'desc_ar': 'مشكل في تردد ESP', 'cause_fr': 'Fréquence ESP incorrecte', 'cause_ar': 'تردد ESP غير صحيح', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1269': {'desc_fr': 'Problème horloge ESP', 'desc_ar': 'مشكل في ساعة ESP', 'cause_fr': 'Horloge ESP défectueuse', 'cause_ar': 'ساعة ESP تالفة', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1270': {'desc_fr': 'Problème mémoire ESP', 'desc_ar': 'مشكل في ذاكرة ESP', 'cause_fr': 'Mémoire ESP corrompue', 'cause_ar': 'ذاكرة ESP تالفة', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1271': {'desc_fr': 'Problème processeur ESP', 'desc_ar': 'مشكل في معالج ESP', 'cause_fr': 'Processeur ESP HS', 'cause_ar': 'معالج ESP معطوب', 'solution_fr': 'Remplacer module ESP', 'solution_ar': 'استبدل موديول ESP', 'prix': '300-1500€', 'categorie': 'Système ESP'},
+        'C1272': {'desc_fr': 'Problème logiciel ESP', 'desc_ar': 'مشكل في برمجية ESP', 'cause_fr': 'Logiciel ESP corrompu', 'cause_ar': 'برمجية ESP تالفة', 'solution_fr': 'Reprogrammer ESP', 'solution_ar': 'أعد برمجة ESP', 'prix': '150-600€', 'categorie': 'Système ESP'},
+        'C1273': {'desc_fr': 'Problème configuration ESP', 'desc_ar': 'مشكل في إعدادات ESP', 'cause_fr': 'Configuration ESP incorrecte', 'cause_ar': 'إعدادات ESP غير صحيحة', 'solution_fr': 'Configurer ESP', 'solution_ar': 'اضبط نظام ESP', 'prix': '100-500€', 'categorie': 'Système ESP'},
+        'C1274': {'desc_fr': 'Problème sécurité ESP', 'desc_ar': 'مشكل في أمان ESP', 'cause_fr': 'Sécurité ESP activée', 'cause_ar': 'أمان ESP مفعل', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1275': {'desc_fr': 'Problème diagnostic ESP', 'desc_ar': 'مشكل في تشخيص ESP', 'cause_fr': 'Diagnostic ESP impossible', 'cause_ar': 'تشخيص ESP مستحيل', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1276': {'desc_fr': 'Problème initialisation ESP', 'desc_ar': 'مشكل في تهيئة ESP', 'cause_fr': 'Initialisation ESP échouée', 'cause_ar': 'تهيئة ESP فشلت', 'solution_fr': 'Réinitialiser ESP', 'solution_ar': 'أعد تهيئة ESP', 'prix': '100-500€', 'categorie': 'Système ESP'},
+        'C1277': {'desc_fr': 'Problème démarrage ESP', 'desc_ar': 'مشكل في بدء ESP', 'cause_fr': 'Démarrage ESP échoué', 'cause_ar': 'بدء ESP فشل', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1278': {'desc_fr': 'Problème arrêt ESP', 'desc_ar': 'مشكل في إيقاف ESP', 'cause_fr': 'Arrêt ESP échoué', 'cause_ar': 'إيقاف ESP فشل', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1279': {'desc_fr': 'Problème redémarrage ESP', 'desc_ar': 'مشكل في إعادة بدء ESP', 'cause_fr': 'Redémarrage ESP échoué', 'cause_ar': 'إعادة بدء ESP فشلت', 'solution_fr': 'Tester ESP', 'solution_ar': 'افحص نظام ESP', 'prix': '200-1000€', 'categorie': 'Système ESP'},
+        'C1280': {'desc_fr': 'Problème réinitialisation ESP', 'desc_ar': 'مشكل في إعادة ضبط ESP', 'cause_fr': 'Réinitialisation ESP échouée', 'cause_ar': 'إعادة ضبط ESP فشلت', 'solution_fr': 'Réinitialiser ESP', 'solution_ar': 'أعد ضبط ESP', 'prix': '100-500€', 'categorie': 'Système ESP'},
+    }
+    
+    # Si code trouvé dans chassis_db
+    if dtc in chassis_db:
+        return chassis_db[dtc], True
+    
+    # ========================================================================
+    # BASE DE DONNÉES COMPLÈTE - CARROSSERIE (B0xxx)
+    # ========================================================================
+    body_db = {
+        'B0000': {'desc_fr': 'Airbag conducteur circuit', 'desc_ar': 'دائرة وسادة هوائية السائق', 'cause_fr': 'Airbag conducteur, câblage', 'cause_ar': 'وسادة السائق، أسلاك', 'solution_fr': 'Tester airbag conducteur', 'solution_ar': 'افحص وسادة السائق', 'prix': '200-800€', 'categorie': 'Airbag'},
+        'B0001': {'desc_fr': 'Airbag passager circuit', 'desc_ar': 'دائرة وسادة هوائية الراكب', 'cause_fr': 'Airbag passager, câblage', 'cause_ar': 'وسادة الراكب، أسلاك', 'solution_fr': 'Tester airbag passager', 'solution_ar': 'افحص وسادة الراكب', 'prix': '200-800€', 'categorie': 'Airbag'},
+        'B0010': {'desc_fr': 'Airbag conducteur résistance basse', 'desc_ar': 'مقاومة وسادة السائق منخفضة', 'cause_fr': 'Airbag conducteur HS', 'cause_ar': 'وسادة السائق معطوبة', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
+        'B0011': {'desc_fr': 'Airbag conducteur résistance haute', 'desc_ar': 'مقاومة وسادة السائق عالية', 'cause_fr': 'Airbag conducteur défectueux', 'cause_ar': 'وسادة السائق تالفة', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
+        'B0012': {'desc_fr': 'Airbag conducteur circuit ouvert', 'desc_ar': 'دائرة وسادة السائق مفتوحة', 'cause_fr': 'Airbag conducteur circuit ouvert', 'cause_ar': 'دائرة وسادة السائق مفتوحة', 'solution_fr': 'Tester câblage airbag', 'solution_ar': 'افحص أسلاك الوسادة', 'prix': '150-600€', 'categorie': 'Airbag'},
+        'B0013': {'desc_fr': 'Airbag conducteur court-circuit', 'desc_ar': 'دائرة وسادة السائق مقصورة', 'cause_fr': 'Airbag conducteur court-circuit', 'cause_ar': 'دائرة وسادة السائق مقصورة', 'solution_fr': 'Tester câblage airbag', 'solution_ar': 'افحص أسلاك الوسادة', 'prix': '150-600€', 'categorie': 'Airbag'},
+        'B0020': {'desc_fr': 'Airbag passager résistance basse', 'desc_ar': 'مقاومة وسادة الراكب منخفضة', 'cause_fr': 'Airbag passager HS', 'cause_ar': 'وسادة الراكب معطوبة', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
+        'B0021': {'desc_fr': 'Airbag passager résistance haute', 'desc_ar': 'مقاومة وسادة الراكب عالية', 'cause_fr': 'Airbag passager défectueux', 'cause_ar': 'وسادة الراكب تالفة', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
+        'B0022': {'desc_fr': 'Airbag passager circuit ouvert', 'desc_ar': 'دائرة وسادة الراكب مفتوحة', 'cause_fr': 'Airbag passager circuit ouvert', 'cause_ar': 'دائرة وسادة الراكب مفتوحة', 'solution_fr': 'Tester câblage airbag', 'solution_ar': 'افحص أسلاك الوسادة', 'prix': '150-600€', 'categorie': 'Airbag'},
+        'B0023': {'desc_fr': 'Airbag passager court-circuit', 'desc_ar': 'دائرة وسادة الراكب مقصورة', 'cause_fr': 'Airbag passager court-circuit', 'cause_ar': 'دائرة وسادة الراكب مقصورة', 'solution_fr': 'Tester câblage airbag', 'solution_ar': 'افحص أسلاك الوسادة', 'prix': '150-600€', 'categorie': 'Airbag'},
+        'B0030': {'desc_fr': 'Airbag latéral conducteur circuit', 'desc_ar': 'دائرة وسادة السائق الجانبية', 'cause_fr': 'Airbag latéral conducteur', 'cause_ar': 'وسادة السائق الجانبية', 'solution_fr': 'Tester airbag latéral', 'solution_ar': 'افحص الوسادة الجانبية', 'prix': '250-900€', 'categorie': 'Airbag'},
+        'B0040': {'desc_fr': 'Airbag latéral passager circuit', 'desc_ar': 'دائرة وسادة الراكب الجانبية', 'cause_fr': 'Airbag latéral passager', 'cause_ar': 'وسادة الراكب الجانبية', 'solution_fr': 'Tester airbag latéral', 'solution_ar': 'افحص الوسادة الجانبية', 'prix': '250-900€', 'categorie': 'Airbag'},
+        'B0050': {'desc_fr': 'Airbag rideau conducteur circuit', 'desc_ar': 'دائرة وسادة الستارة للسائق', 'cause_fr': 'Airbag rideau conducteur', 'cause_ar': 'وسادة الستارة للسائق', 'solution_fr': 'Tester airbag rideau', 'solution_ar': 'افحص وسادة الستارة', 'prix': '300-1000€', 'categorie': 'Airbag'},
+        'B0051': {'desc_fr': 'Airbag rideau passager circuit', 'desc_ar': 'دائرة وسادة الستارة للراكب', 'cause_fr': 'Airbag rideau passager', 'cause_ar': 'وسادة الستارة للراكب', 'solution_fr': 'Tester airbag rideau', 'solution_ar': 'افحص وسادة الستارة', 'prix': '300-1000€', 'categorie': 'Airbag'},
+        'B0060': {'desc_fr': 'Prétensionneur ceinture conducteur', 'desc_ar': 'شاد حزام السائق', 'cause_fr': 'Prétensionneur conducteur', 'cause_ar': 'شاد حزام السائق', 'solution_fr': 'Tester prétensionneur', 'solution_ar': 'افحص الشاد', 'prix': '200-700€', 'categorie': 'Ceinture'},
+        'B0061': {'desc_fr': 'Prétensionneur ceinture passager', 'desc_ar': 'شاد حزام الراكب', 'cause_fr': 'Prétensionneur passager', 'cause_ar': 'شاد حزام الراكب', 'solution_fr': 'Tester prétensionneur', 'solution_ar': 'افحص الشاد', 'prix': '200-700€', 'categorie': 'Ceinture'},
+    }
+    
+    # Si code trouvé dans body_db
+    if dtc in body_db:
+        return body_db[dtc], True
+    
+    # ========================================================================
+    # BASE DE DONNÉES COMPLÈTE - RÉSEAU (U0xxx)
+    # ========================================================================
+    network_db = {
+        'U0001': {'desc_fr': 'Bus CAN haute vitesse', 'desc_ar': 'شبكة CAN عالية السرعة', 'cause_fr': 'Problème réseau CAN', 'cause_ar': 'مشكل في شبكة CAN', 'solution_fr': 'Tester réseau CAN', 'solution_ar': 'افحص شبكة CAN', 'prix': '150-600€', 'categorie': 'Réseau'},
+        'U0002': {'desc_fr': 'Bus CAN haute vitesse performances', 'desc_ar': 'أداء شبكة CAN عالية السرعة', 'cause_fr': 'CAN bus défectueux', 'cause_ar': 'شبكة CAN معطوبة', 'solution_fr': 'Tester CAN bus', 'solution_ar': 'افحص شبكة CAN', 'prix': '150-600€', 'categorie': 'Réseau'},
+        'U0073': {'desc_fr': 'Bus de communication désactivé', 'desc_ar': 'شبكة الاتصال معطلة', 'cause_fr': 'CAN bus désactivé', 'cause_ar': 'شبكة CAN معطلة', 'solution_fr': 'Tester CAN bus', 'solution_ar': 'افحص شبكة CAN', 'prix': '150-600€', 'categorie': 'Réseau'},
+        'U0100': {'desc_fr': 'Perte communication ECU', 'desc_ar': 'فقدان اتصال الكمبيوتر', 'cause_fr': 'ECU ne répond pas', 'cause_ar': 'الكمبيوتر لا يستجيب', 'solution_fr': 'Tester ECU', 'solution_ar': 'افحص الكمبيوتر', 'prix': '200-1000€', 'categorie': 'Réseau'},
+        'U0101': {'desc_fr': 'Perte communication TCM', 'desc_ar': 'فقدان اتصال كمبيوتر العلبة', 'cause_fr': 'TCM ne répond pas', 'cause_ar': 'كمبيوتر العلبة لا يستجيب', 'solution_fr': 'Tester TCM', 'solution_ar': 'افحص كمبيوتر العلبة', 'prix': '200-1000€', 'categorie': 'Réseau'},
+        'U0121': {'desc_fr': 'Perte communication module ABS', 'desc_ar': 'فقدان اتصال موديول ABS', 'cause_fr': 'Module ABS ne répond pas', 'cause_ar': 'موديول ABS لا يستجيب', 'solution_fr': 'Tester module ABS', 'solution_ar': 'افحص موديول ABS', 'prix': '200-1000€', 'categorie': 'Réseau'},
+        'U0140': {'desc_fr': 'Perte communication BCM', 'desc_ar': 'فقدان اتصال كمبيوتر الجسم', 'cause_fr': 'BCM ne répond pas', 'cause_ar': 'كمبيوتر الجسم لا يستجيب', 'solution_fr': 'Tester BCM', 'solution_ar': 'افحص كمبيوتر الجسم', 'prix': '200-1000€', 'categorie': 'Réseau'},
+        'U0155': {'desc_fr': 'Perte communication cluster', 'desc_ar': 'فقدان اتصال لوحة العدادات', 'cause_fr': 'Cluster ne répond pas', 'cause_ar': 'لوحة العدادات لا تستجيب', 'solution_fr': 'Tester cluster', 'solution_ar': 'افحص لوحة العدادات', 'prix': '200-1000€', 'categorie': 'Réseau'},
+        'U0164': {'desc_fr': 'Perte communication climatisation', 'desc_ar': 'فقدان اتصال التكييف', 'cause_fr': 'Module A/C ne répond pas', 'cause_ar': 'موديول التكييف لا يستجيب', 'solution_fr': 'Tester module A/C', 'solution_ar': 'افحص موديول التكييف', 'prix': '150-600€', 'categorie': 'Réseau'},
+        'U0184': {'desc_fr': 'Perte communication radio', 'desc_ar': 'فقدان اتصال الراديو', 'cause_fr': 'Radio ne répond pas', 'cause_ar': 'الراديو لا يستجيب', 'solution_fr': 'Tester radio', 'solution_ar': 'افحص الراديو', 'prix': '100-500€', 'categorie': 'Réseau'},
+        'U0198': {'desc_fr': 'Perte communication module télématique', 'desc_ar': 'فقدان اتصال الموديول عن بعد', 'cause_fr': 'Module télématique HS', 'cause_ar': 'الموديول عن بعد معطوب', 'solution_fr': 'Tester module', 'solution_ar': 'افحص الموديول', 'prix': '200-800€', 'categorie': 'Réseau'},
+        'U0200': {'desc_fr': 'Perte communication porte conducteur', 'desc_ar': 'فقدان اتصال باب السائق', 'cause_fr': 'Module porte conducteur', 'cause_ar': 'موديول باب السائق', 'solution_fr': 'Tester module porte', 'solution_ar': 'افحص موديول الباب', 'prix': '100-400€', 'categorie': 'Réseau'},
+        'U0201': {'desc_fr': 'Perte communication porte passager', 'desc_ar': 'فقدان اتصال باب الراكب', 'cause_fr': 'Module porte passager', 'cause_ar': 'موديول باب الراكب', 'solution_fr': 'Tester module porte', 'solution_ar': 'افحص موديول الباب', 'prix': '100-400€', 'categorie': 'Réseau'},
+        'U0300': {'desc_fr': 'Incompatibilité logiciel interne', 'desc_ar': 'عدم توافق البرمجية الداخلية', 'cause_fr': 'Logiciel ECU incompatible', 'cause_ar': 'برمجية الكمبيوتر غير متوافقة', 'solution_fr': 'Mettre à jour logiciel', 'solution_ar': 'حدث البرمجية', 'prix': '100-500€', 'categorie': 'Réseau'},
+        'U0400': {'desc_fr': 'Données invalides reçues', 'desc_ar': 'بيانات غير صالحة مستلمة', 'cause_fr': 'Données CAN invalides', 'cause_ar': 'بيانات CAN غير صالحة', 'solution_fr': 'Tester réseau CAN', 'solution_ar': 'افحص شبكة CAN', 'prix': '150-600€', 'categorie': 'Réseau'},
+    }
+    
+    # Si code trouvé dans network_db
+    if dtc in network_db:
+        return network_db[dtc], True
+    
+    # ========================================================================
+    # SYSTÈME DE CATÉGORISATION AUTOMATIQUE (Fallback)
+    # ========================================================================
+    # Si code non trouvé → Détection par catégorie
     category_rules = {
-        'P01': {
-            'desc_fr': f'Problème injection/admission ({dtc})',
-            'desc_ar': f'مشكل في الحقن أو الدخول ({dtc})',
-            'cause_fr': 'Système fuel/air, capteurs MAF/O2, injecteurs',
-            'cause_ar': 'نظام الوقود/الهواء، الحساسات، البخاخات',
-            'solution_fr': 'Vérifier circuit fuel, capteurs, fuites',
-            'solution_ar': 'تفقد دائرة الوقود، الحساسات، التسريبات',
-            'prix': '80-400€',
-            'categorie': 'Injection/Admission'
-        },
-        'P02': {
-            'desc_fr': f'Problème circuit injecteur ({dtc})',
-            'desc_ar': f'مشكل في دائرة البخاخات ({dtc})',
-            'cause_fr': 'Injecteur, câblage, connecteurs',
-            'cause_ar': 'بخاخ، أسلاك، موصلات',
-            'solution_fr': 'Tester injecteur, vérifier câblage',
-            'solution_ar': 'افحص البخاخ، تفقد الأسلاك',
-            'prix': '100-500€',
-            'categorie': 'Injecteurs'
-        },
-        'P03': {
-            'desc_fr': f'Problème allumage/ratés ({dtc})',
-            'desc_ar': f'مشكل في الإشعال/الاحتراق ({dtc})',
-            'cause_fr': 'Bougies, bobines, fils bougies',
-            'cause_ar': 'البوجيات، الكويلات، أسلاك البوجي',
-            'solution_fr': 'Tester système allumage, compression',
-            'solution_ar': 'افحص نظام الإشعال، الكومبراس',
-            'prix': '80-450€',
-            'categorie': 'Allumage'
-        },
-        'P04': {
-            'desc_fr': f'Problème antipollution ({dtc})',
-            'desc_ar': f'مشكل في نظام مكافحة التلوث ({dtc})',
-            'cause_fr': 'Catalyseur, EGR, EVAP, O2',
-            'cause_ar': 'الكاتاليزر، صمام EGR، نظام EVAP',
-            'solution_fr': 'Vérifier système échappement/EGR',
-            'solution_ar': 'تفقد نظام العادم/الصمامات',
-            'prix': '100-1500€',
-            'categorie': 'Antipollution'
-        },
-        'P05': {
-            'desc_fr': f'Problème vitesse/régime ({dtc})',
-            'desc_ar': f'مشكل في السرعة/الدوران ({dtc})',
-            'cause_fr': 'Capteur vitesse, régulateur idle',
-            'cause_ar': 'حساس السرعة، منظم الخمول',
-            'solution_fr': 'Tester capteurs vitesse/TPS',
-            'solution_ar': 'افحص حساسات السرعة',
-            'prix': '50-300€',
-            'categorie': 'Vitesse/Régime'
-        },
-        'P06': {
-            'desc_fr': f'Problème calculateur/électronique ({dtc})',
-            'desc_ar': f'مشكل في الكمبيوتر/الإلكترونيات ({dtc})',
-            'cause_fr': 'ECU, câblage, relais, fusibles',
-            'cause_ar': 'الكمبيوتر، الأسلاك، المرحلات، الفيوزات',
-            'solution_fr': 'Vérifier ECU, connexions électriques',
-            'solution_ar': 'تفقد الكمبيوتر، التوصيلات الكهربائية',
-            'prix': '100-1000€',
-            'categorie': 'Électronique'
-        },
-        'P07': {
-            'desc_fr': f'Problème transmission ({dtc})',
-            'desc_ar': f'مشكل في علبة السرعة ({dtc})',
-            'cause_fr': 'Boîte auto, capteurs transmission',
-            'cause_ar': 'علبة السرعة الأوتوماتيكية، الحساسات',
-            'solution_fr': 'Diagnostiquer boîte, niveau huile',
-            'solution_ar': 'شخص علبة السرعة، مستوى الزيت',
-            'prix': '200-2000€',
-            'categorie': 'Transmission'
-        },
-        'P08': {
-            'desc_fr': f'Problème transmission ({dtc})',
-            'desc_ar': f'مشكل في علبة السرعة ({dtc})',
-            'cause_fr': 'Boîte, embrayage, différentiel',
-            'cause_ar': 'علبة السرعة، القابض، التفاضل',
-            'solution_fr': 'Vérifier transmission mécanique',
-            'solution_ar': 'تفقد علبة السرعة الميكانيكية',
-            'prix': '150-1500€',
-            'categorie': 'Transmission'
-        },
-        'B': {
-            'desc_fr': f'Problème carrosserie ({dtc})',
-            'desc_ar': f'مشكل في الهيكل ({dtc})',
-            'cause_fr': 'Airbag, ceintures, habitacle',
-            'cause_ar': 'الوسادة الهوائية، الأحزمة، المقصورة',
-            'solution_fr': 'Vérifier système airbag/carrosserie',
-            'solution_ar': 'تفقد نظام الوسائد/الهيكل',
-            'prix': '100-800€',
-            'categorie': 'Carrosserie'
-        },
-        'C': {
-            'desc_fr': f'Problème châssis ({dtc})',
-            'desc_ar': f'مشكل في الشاسيه ({dtc})',
-            'cause_fr': 'ABS, ESP, suspension, freins',
-            'cause_ar': 'نظام ABS، الثبات، التعليق، الفرامل',
-            'solution_fr': 'Diagnostiquer freins/suspension',
-            'solution_ar': 'شخص الفرامل/التعليق',
-            'prix': '100-1000€',
-            'categorie': 'Châssis'
-        },
-        'U': {
-            'desc_fr': f'Problème réseau communication ({dtc})',
-            'desc_ar': f'مشكل في شبكة الاتصال ({dtc})',
-            'cause_fr': 'CAN Bus, communication modules',
-            'cause_ar': 'شبكة CAN، الاتصال بين الوحدات',
-            'solution_fr': 'Vérifier réseau CAN, connexions',
-            'solution_ar': 'تفقد شبكة CAN، التوصيلات',
-            'prix': '150-600€',
-            'categorie': 'Réseau'
-        },
+        'P01': {'desc_fr': f'Problème injection/admission ({dtc})', 'desc_ar': f'مشكل في الحقن أو الدخول ({dtc})', 'cause_fr': 'Système fuel/air, capteurs MAF/O2', 'cause_ar': 'نظام الوقود/الهواء، الحساسات', 'solution_fr': 'Vérifier circuit fuel, capteurs', 'solution_ar': 'تفقد دائرة الوقود، الحساسات', 'prix': '80-400€', 'categorie': 'Injection/Admission'},
+        'P02': {'desc_fr': f'Problème circuit injecteur ({dtc})', 'desc_ar': f'مشكل في دائرة البخاخات ({dtc})', 'cause_fr': 'Injecteur, câblage', 'cause_ar': 'بخاخ، أسلاك', 'solution_fr': 'Tester injecteur', 'solution_ar': 'افحص البخاخ', 'prix': '100-500€', 'categorie': 'Injecteurs'},
+        'P03': {'desc_fr': f'Problème allumage/ratés ({dtc})', 'desc_ar': f'مشكل في الإشعال ({dtc})', 'cause_fr': 'Bougies, bobines', 'cause_ar': 'البوجيات، الكويلات', 'solution_fr': 'Tester système allumage', 'solution_ar': 'افحص نظام الإشعال', 'prix': '80-450€', 'categorie': 'Allumage'},
+        'P04': {'desc_fr': f'Problème antipollution ({dtc})', 'desc_ar': f'مشكل في نظام مكافحة التلوث ({dtc})', 'cause_fr': 'Catalyseur, EGR, EVAP', 'cause_ar': 'الكاتاليزر، EGR، EVAP', 'solution_fr': 'Vérifier système échappement', 'solution_ar': 'تفقد نظام العادم', 'prix': '100-1500€', 'categorie': 'Antipollution'},
+        'P05': {'desc_fr': f'Problème vitesse/régime ({dtc})', 'desc_ar': f'مشكل في السرعة ({dtc})', 'cause_fr': 'Capteur vitesse', 'cause_ar': 'حساس السرعة', 'solution_fr': 'Tester capteurs', 'solution_ar': 'افحص الحساسات', 'prix': '50-300€', 'categorie': 'Vitesse/Régime'},
+        'P06': {'desc_fr': f'Problème calculateur ({dtc})', 'desc_ar': f'مشكل في الكمبيوتر ({dtc})', 'cause_fr': 'ECU, câblage', 'cause_ar': 'الكمبيوتر، الأسلاك', 'solution_fr': 'Vérifier ECU', 'solution_ar': 'تفقد الكمبيوتر', 'prix': '100-1000€', 'categorie': 'Électronique'},
+        'P07': {'desc_fr': f'Problème transmission ({dtc})', 'desc_ar': f'مشكل في علبة السرعة ({dtc})', 'cause_fr': 'Boîte auto', 'cause_ar': 'علبة السرعة', 'solution_fr': 'Diagnostiquer boîte', 'solution_ar': 'شخص علبة السرعة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P08': {'desc_fr': f'Problème transmission ({dtc})', 'desc_ar': f'مشكل في علبة السرعة ({dtc})', 'cause_fr': 'Boîte, embrayage', 'cause_ar': 'علبة السرعة، القابض', 'solution_fr': 'Vérifier transmission', 'solution_ar': 'تفقد علبة السرعة', 'prix': '150-1500€', 'categorie': 'Transmission'},
+        'B': {'desc_fr': f'Problème carrosserie ({dtc})', 'desc_ar': f'مشكل في الهيكل ({dtc})', 'cause_fr': 'Airbag, habitacle', 'cause_ar': 'الوسائد، المقصورة', 'solution_fr': 'Vérifier airbag', 'solution_ar': 'تفقد الوسائد', 'prix': '100-800€', 'categorie': 'Carrosserie'},
+        'C': {'desc_fr': f'Problème châssis ({dtc})', 'desc_ar': f'مشكل في الشاسيه ({dtc})', 'cause_fr': 'ABS, ESP, freins', 'cause_ar': 'ABS، الفرامل', 'solution_fr': 'Diagnostiquer freins', 'solution_ar': 'شخص الفرامل', 'prix': '100-1000€', 'categorie': 'Châssis'},
+        'U': {'desc_fr': f'Problème réseau ({dtc})', 'desc_ar': f'مشكل في الشبكة ({dtc})', 'cause_fr': 'CAN Bus', 'cause_ar': 'شبكة CAN', 'solution_fr': 'Vérifier CAN', 'solution_ar': 'تفقد شبكة CAN', 'prix': '150-600€', 'categorie': 'Réseau'},
     }
     
-    # Chercher catégorie
+    # Chercher la catégorie
     for prefix, info in category_rules.items():
         if dtc.startswith(prefix):
-            return info, False
+            return info, False  # False = code inconnu mais catégorie trouvée
     
     # Default
-    return {
-        'desc_fr': f'Code {dtc} non répertorié',
-        'desc_ar': f'الكود {dtc} غير مسجل',
-        'cause_fr': 'Consulter manuel constructeur',
-        'cause_ar': 'راجع دليل الصانع',
-        'solution_fr': 'Diagnostic approfondi nécessaire',
-        'solution_ar': 'التشخيص العميق ضروري',
-        'prix': 'N/A',
-        'categorie': 'Inconnue'
-    }, False
-
-# ============================================================================
-# FONCTION 4: Entraînement modèle AI
-# ============================================================================
-@st.cache_resource
-def train_model():
-    data = {
-        'DTC': ['P0171', 'P0300', 'P0420', 'P0128', 'P0101', 'P0442', 'P0172', 'P0301'],
-        'RPM': [800, 2200, 1500, 750, 2800, 900, 2000, 2400],
-        'Load': [15, 45, 35, 10, 60, 20, 40, 50],
-        'Temp': [90, 95, 105, 70, 110, 88, 92, 98],
-        'Severity': ['Medium', 'High', 'Medium', 'Low', 'High', 'Low', 'Medium', 'High']
-    }
-    df = pd.DataFrame(data)
-    le = LabelEncoder()
-    df['DTC_Enc'] = le.fit_transform(df['DTC'])
-    X = df[['DTC_Enc', 'RPM', 'Load', 'Temp']]
-    y = df['Severity']
-    model = RandomForestClassifier(n_estimators=50, max_depth=3, random_state=42)
-    model.fit(X, y)
-    return model, le
-
-# ============================================================================
-# INTERFACE STREAMLIT
-# ============================================================================
-
-# Sélecteur langue
-with st.sidebar:
-    lang_choice = st.selectbox("🌐 Language / اللغة", ["Français 🇫🇷", "العربية 🇲🇦"])
-    st.session_state.language = 'ar' if 'العربية' in lang_choice else 'fr'
-
-t = TRANSLATIONS[st.session_state.language]
-
-# CSS
-st.markdown("""
-<style>
-    h1 {
-        text-align: center;
-        background: linear-gradient(90deg, #1e3a8a, #3b82f6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        padding: 20px;
-    }
-    .success-box {
-        background-color: #d1fae5;
-        border-left: 5px solid #10b981;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 5px;
-    }
-    .warning-box {
-        background-color: #fef3c7;
-        border-left: 5px solid #f59e0b;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 5px;
-    }
-    .error-box {
-        background-color: #fee2e2;
-        border-left: 5px solid #ef4444;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 5px;
-    }
-    .info-box {
-        background-color: #dbeafe;
-        border-left: 5px solid #3b82f6;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 5px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.title(t['title'])
-
-# Sidebar
-with st.sidebar:
-    st.header(t['sidebar_title'])
-    st.subheader(t['import_data'])
-    
-    upload_method = st.radio(t['method'], [t['csv'], t['text_ocr'], t['manual']])
-    
-    if upload_method == t['csv']:
-        uploaded_file = st.file_uploader(t['choose_csv'], type=["csv", "txt"])
-    else:
-        uploaded_file = None
-    
-    if upload_method == t['manual']:
-        st.text_input(t['dtc_code'], key="manual_dtc")
-        st.number_input(t['rpm'], value=800, key="manual_rpm")
-        st.number_input(t['load'], value=15, key="manual_load")
-        st.number_input(t['temp'], value=90, key="manual_temp")
-    
-    st.subheader(t['search_dtc'])
-    search = st.text_input(t['dtc_code'], placeholder=t['placeholder_dtc'])
-    if search:
-        valid_search = extract_valid_dtc(search)
-        if valid_search:
-            info, known = get_dtc_info(valid_search)
-            lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
-            desc_key = f'desc_{lang_key}'
-            st.info(f"**{info[desc_key]}**\n\n💰 {info['prix']}\n\n📂 {info['categorie']}")
-
-# ============================================================================
-# TRAITEMENT CSV
-# ============================================================================
-if upload_method == t['csv'] and uploaded_file is not None:
-    try:
-        # Lecture fichier
-        try:
-            df = pd.read_csv(uploaded_file, encoding='utf-8')
-        except:
-            try:
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file, encoding='latin-1')
-            except:
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file, encoding='cp1252', sep=';')
-        
-        st.success(t['file_loaded'])
-        st.write(f"**{t['columns_detected']}**: {', '.join(df.columns)}")
-        
-        # Détection colonnes
-        dtc_col = rpm_col = load_col = temp_col = None
-        
-        for col in df.columns:
-            col_lower = col.lower().strip()
-            if 'dtc' in col_lower or 'code' in col_lower or 'defaut' in col_lower:
-                dtc_col = col
-            if 'rpm' in col_lower:
-                rpm_col = col
-            if 'load' in col_lower or 'charge' in col_lower:
-                load_col = col
-            if 'temp' in col_lower or 'coolant' in col_lower:
-                temp_col = col
-        
-        if dtc_col is None:
-            st.error(t['dtc_col_not_found'])
-            dtc_col = st.selectbox(t['select_dtc_col'], df.columns.tolist())
-        
-        # Nettoyage données
-        if rpm_col:
-            df['RPM'] = df[rpm_col].apply(clean_numeric)
-        else:
-            df['RPM'] = 0.0
-        
-        if load_col:
-            df['Load'] = df[load_col].apply(clean_numeric)
-        else:
-            df['Load'] = 0.0
-        
-        if temp_col:
-            df['Temp'] = df[temp_col].apply(clean_numeric)
-        else:
-            df['Temp'] = 0.0
-        
-        st.subheader(t['data_preview'])
-        st.dataframe(df.head())
-        
-        # Analyse
-        model, le = train_model()
-        results = []
-        lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
-        
-        for idx, row in df.iterrows():
-            # 1. Récupérer valeur brute
-            raw_value = str(row[dtc_col]).strip()
-            
-            # 2. Ignorer valeurs vides
-            if not raw_value or len(raw_value) < 4:
-                continue
-            
-            if raw_value.lower() in ['none', 'nan', 'null', '-', '', 'n/a']:
-                continue
-            
-            # 3. Extraire code DTC valide
-            dtc = extract_valid_dtc(raw_value)
-            
-            # 4. Si pas code valide → ignorer
-            if dtc is None:
-                continue
-            
-            # 5. Récupérer données
-            rpm = float(df['RPM'].iloc[idx])
-            load = float(df['Load'].iloc[idx])
-            temp = float(df['Temp'].iloc[idx])
-            
-            # 6. Obtenir informations DTC
-            info, is_known = get_dtc_info(dtc)
-            
-            # 7. Prédire sévérité
-            try:
-                dtc_enc = le.transform([dtc])[0] if dtc in le.classes_ else 0
-            except:
-                dtc_enc = 0
-            
-            severity = model.predict([[dtc_enc, rpm, load, temp]])[0]
-            
-            # 8. Préparer résultat
-            desc_key = f'desc_{lang_key}'
-            cause_key = f'cause_{lang_key}'
-            solution_key = f'solution_{lang_key}'
-            
-            results.append({
-                t['dtc_code']: dtc,
-                'Description': info[desc_key],
-                t['category']: info['categorie'],
-                t['cause']: info[cause_key],
-                t['solution']: info[solution_key],
-                t['price']: info['prix'],
-                t['severity']: severity,
-                t['status']: t['known'] if is_known else t['category_detected']
-            })
-        
-        if not results:
-            st.warning(t['no_dtc_found'])
-            st.stop()
-        
-        results_df = pd.DataFrame(results)
-        
-        # Dashboard
-        st.subheader(t['analysis_results'])
-        col1, col2, col3 = st.columns(3)
-        high = len(results_df[results_df[t['severity']] == 'High'])
-        med = len(results_df[results_df[t['severity']] == 'Medium'])
-        low = len(results_df[results_df[t['severity']] == 'Low'])
-        
-        col1.metric(t['high'], high)
-        col2.metric(t['medium'], med)
-        col3.metric(t['low'], low)
-        
-        # Graphique
-        fig = px.pie(results_df, names=t['severity'], 
-                     color=t['severity'],
-                     color_discrete_map={'High': '#ef4444', 'Medium': '#f59e0b', 'Low': '#10b981'},
-                     title=t['distribution'])
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Détails
-        st.subheader(t['details'])
-        for idx, row in results_df.iterrows():
-            sev = row[t['severity']]
-            box_class = "error-box" if sev == 'High' else "warning-box" if sev == 'Medium' else "success-box"
-            
-            st.markdown(f"""
-            <div class="{box_class}">
-                <h4>🔧 {row[t['dtc_code']]} {row[t['status']]}</h4>
-                <p><strong>{t['category']}:</strong> {row[t['category']]}</p>
-                <p><strong>Description:</strong> {row['Description']}</p>
-                <p><strong>{t['severity']}:</strong> {sev} | <strong>{t['price']}:</strong> {row[t['price']]}</p>
-                <p><strong>{t['cause']}:</strong> {row[t['cause']]}</p>
-                <p><strong>{t['solution']}:</strong> {row[t['solution']]}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Export
-        csv = results_df.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(t['download'], csv, f"diag_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
-        
-    except Exception as e:
-        st.error(f"{t['error']} {str(e)}")
-        st.exception(e)
-
-# ============================================================================
-# TRAITEMENT TEXTE/OCR
-# ============================================================================
-elif upload_method == t['text_ocr']:
-    st.subheader("📸 Scanner/Copier-Coller")
-    st.info(t['paste_text'])
-    
-    text_input = st.text_area("", height=200, 
-                              placeholder="Ex: P0171 - System Too Lean\nRPM: 800\nLoad: 15%")
-    
-    if st.button(t['analyze']):
-        # Extraire codes valides
-        dtc_matches = re.findall(r'\b(P|B|C|U)\d{4}\b', text_input)
-        dtc_codes = list(set([m[0] + text_input[text_input.find(m[0]+m[1]):text_input.find(m[0]+m[1])+5] 
-                              for m in dtc_matches]))
-        
-        if dtc_codes:
-            st.success(f"✅ {len(dtc_codes)} code(s) trouvé(s): {', '.join(dtc_codes)}")
-            
-            results = []
-            lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
-            
-            for dtc in dtc_codes:
-                info, is_known = get_dtc_info(dtc)
-                desc_key = f'desc_{lang_key}'
-                
-                results.append({
-                    t['dtc_code']: dtc,
-                    'Description': info[desc_key],
-                    t['status']: t['known'] if is_known else t['category_detected']
-                })
-            
-            st.dataframe(pd.DataFrame(results))
-        else:
-            st.warning("⚠️ Aucun code DTC trouvé")
-
-# ============================================================================
-# SAISIE MANUELLE
-# ============================================================================
-elif upload_method == t['manual']:
-    if st.session_state.get('manual_dtc'):
-        dtc = st.session_state.manual_dtc.upper()
-        valid_dtc = extract_valid_dtc(dtc)
-        
-        if valid_dtc:
-            info, is_known = get_dtc_info(valid_dtc)
-            lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
-            desc_key = f'desc_{lang_key}'
-            
-            st.info(f"**{valid_dtc}**\n\n{info[desc_key]}\n\n💰 {info['prix']}\n\n📂 {info['categorie']}")
-        else:
-            st.error("❌ Code DTC invalide")
-
-# Footer
-st.markdown("---")
-st.markdown(t['footer'])
+    return {'desc_fr': f'Code {dtc} non répertorié', 'desc_ar': f'الكود {dtc} غير مسجل', 'cause_fr': 'Consulter manuel', 'cause_ar': 'راجع الدليل', 'solution_fr': 'Diagnostic approfondi nécessaire', 'solution_ar': 'التشخيص العميق ضروري', 'prix': 'N/A', 'categorie': 'Inconnue'}, False
