@@ -365,14 +365,15 @@ if uploaded_file is not None:
             if 'temp' in cl: temp_col = col
         
         if not dtc_col:
-            for col in df.columns:
-                if df[col].dtype == 'object' and df[col].str.contains(r'P\d{{4}}|C\d{{4}}|B\d{{4}}|U\d{{4}}', regex=True, na=False).any():
-                    dtc_col = col
-                    break
-        
-        if not dtc_col:
-            st.error(t['dtc_col_not_found'])
-            st.stop()
+               if not dtc_col:
+        for col in df.columns:
+            if df[col].dtype == 'object' and df[col].str.contains(r'P\d{4}|C\d{4}|B\d{4}|U\d{4}', regex=True, na=False).any():
+                dtc_col = col
+                break  # <-- Hna kanet l-mochkil dyal indentation
+    
+    if not dtc_col:
+        st.error("Colonne DTC non trouvée!")
+        st.stop()
         
         # Clean data
         df['RPM'] = df[rpm_col].apply(clean_numeric) if rpm_col else 0.0
