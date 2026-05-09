@@ -21,7 +21,7 @@ st.set_page_config(
 BACKGROUND_IMAGE = "https://images.unsplash.com/photo-1618843479313-895a43d5a593?w=1920"
 
 # ============================================================================
-# TRANSLATIONS
+# TRANSLATIONS (MSOL7 - Darija Added)
 # ============================================================================
 if 'language' not in st.session_state:
     st.session_state.language = 'fr'
@@ -43,7 +43,12 @@ TRANSLATIONS = {
         'manual': 'Saisie Manuelle',
         'choose_csv': 'Choisir fichier CSV',
         'upload': 'Upload',
+        'dtc_code': 'Code DTC',
+        'rpm': 'RPM',
+        'load': 'Charge %',
+        'temp': 'Température °C',
         'file_loaded': '✅ Fichier chargé avec succès!',
+        'dtc_col_not_found': 'Colonne DTC non trouvée!',
         'analysis_results': '📊 Analyse des Résultats',
         'details': '🔧 Détails des défauts',
         'severity': 'Sévérité',
@@ -81,7 +86,12 @@ TRANSLATIONS = {
         'manual': 'إدخال يدوي',
         'choose_csv': 'اختر ملف CSV',
         'upload': 'رفع',
+        'dtc_code': 'كود العطل',
+        'rpm': 'دورة المحرك',
+        'load': 'الحمل %',
+        'temp': 'درجة الحرارة °C',
         'file_loaded': '✅ تم تحميل الملف بنجاح!',
+        'dtc_col_not_found': 'لم يتم العثور على عمود DTC!',
         'analysis_results': '📊 تحليل النتائج',
         'details': '🔧 تفاصيل الأعطال',
         'severity': 'الخطورة',
@@ -102,6 +112,49 @@ TRANSLATIONS = {
         'critical': 'حرج',
         'warning': 'تحذير',
         'info': 'معلومات'
+    },
+    'dar': {
+        'title': 'AutoDiag Pro',
+        'subtitle': 'تشخيص ذكي و سريع',
+        'sidebar_title': 'القائمة',
+        'dashboard': '📊 لوحة التحكم',
+        'live_data': '📈 بيانات مباشرة',
+        'dtcs': '🔧 كودات الخطأ',
+        'clear_codes': '❌ مسح الخطأ',
+        'reports': '📄 التقارير',
+        'import_data': '📁 جلب البيانات',
+        'method': 'الطريقة:',
+        'csv': 'CSV',
+        'text_ocr': 'نص/مسح',
+        'manual': 'إدخال يدوي',
+        'choose_csv': 'اختار ملف CSV',
+        'upload': 'رفع',
+        'dtc_code': 'كود الخطأ',
+        'rpm': 'دوران المحرك',
+        'load': 'الحمل %',
+        'temp': 'الحرارة °C',
+        'file_loaded': '✅ الملف ترفع بنجاح!',
+        'dtc_col_not_found': 'عمود DTC ما تلاقاش!',
+        'analysis_results': '📊 تحليل النتائج',
+        'details': '🔧 تفاصيل الأعطال',
+        'severity': 'الخطورة',
+        'price': 'الثمن',
+        'cause': 'السبب',
+        'solution': 'الحل',
+        'download': '📥 تحميل التقرير',
+        'no_dtc_found': '⚠️ ما تلاقا والو',
+        'error': '❌ خطأ:',
+        'category': 'الفئة',
+        'status': 'الحالة',
+        'known': '✅ معروف',
+        'category_detected': 'ℹ️ الفئة مكتشفة',
+        'engine_health': 'صحة المحرك',
+        'battery_voltage': 'البطارية',
+        'system_status': 'حالة النظام',
+        'active_dtcs': 'الأعطال النشطة',
+        'critical': 'خطر',
+        'warning': 'تحذير',
+        'info': 'معلومات'
     }
 }
 
@@ -109,39 +162,54 @@ TRANSLATIONS = {
 # HELPER FUNCTIONS
 # ============================================================================
 def extract_valid_dtc(value):
-    if not value: return None
+    if not value:
+        return None
     value = str(value).strip().upper()
     match = re.search(r'\b(P|B|C|U)(\d{4})\b', value)
     return match.group(0) if match else None
 
 def clean_numeric(val):
-    if val is None or str(val).lower() in ['none', 'nan', 'error', '--', '', 'n/a']: return 0.0
+    if val is None or str(val).lower() in ['none', 'nan', 'error', '--', '', 'n/a']:
+        return 0.0
     clean = re.sub(r'[^\d.]', '', str(val))
-    try: return float(clean) if clean else 0.0
-    except ValueError: return 0.0
+    try:
+        return float(clean) if clean else 0.0
+    except ValueError:
+        return 0.0
 
 def get_dtc_info(dtc_code):
     dtc = dtc_code.strip().upper()
-    specific_db = {
-        'P0171': {'desc_fr': 'Système trop pauvre (Banque 1)', 'desc_ar': 'نظام الوقود فقير جداً (بنك 1)', 'cause_fr': 'Fuite d\'air, MAF, O2', 'cause_ar': 'تسريب هواء، MAF، O2', 'solution_fr': 'Vérifier fuites, nettoyer MAF', 'solution_ar': 'تفقد التسريب، نظف MAF', 'prix': '50-300€', 'categorie': 'Injection'},
-        'P0300': {'desc_fr': 'Ratés d\'allumage multiples', 'desc_ar': 'احتراق عشوائي متعدد', 'cause_fr': 'Bougies, bobines', 'cause_ar': 'البوجيات، الكويلات', 'solution_fr': 'Tester bougies et bobines', 'solution_ar': 'افحص البوجيات والكويلات', 'prix': '100-500€', 'categorie': 'Allumage'},
-        'C0035': {'desc_fr': 'Capteur vitesse roue avant gauche', 'desc_ar': 'حساس سرعة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG, câblage', 'cause_ar': 'حساس ABS الأمامي الأيسر، أسلاك', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة اليسرى', 'prix': '100-300€', 'categorie': 'ABS'},
-        'B0000': {'desc_fr': 'Airbag conducteur circuit', 'desc_ar': 'دائرة وسادة السائق', 'cause_fr': 'Airbag, câblage', 'cause_ar': 'الوسادة، الأسلاك', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
-        'U0100': {'desc_fr': 'Perte communication ECU', 'desc_ar': 'فقدان اتصال الكمبيوتر', 'cause_fr': 'ECU ne répond pas', 'cause_ar': 'الكمبيوتر لا يستجيب', 'solution_fr': 'Tester ECU et CAN', 'solution_ar': 'افحص الكمبيوتر وشبكة CAN', 'prix': '200-1000€', 'categorie': 'Réseau'},
-    }
-    if dtc in specific_db: return specific_db[dtc], True
     
-    rules = {
-        'P01': {'desc_fr': f'Problème injection ({dtc})', 'desc_ar': f'مشكل حقن ({dtc})', 'cause_fr': 'Système fuel/air', 'cause_ar': 'نظام الوقود', 'solution_fr': 'Vérifier injection', 'solution_ar': 'تفقد الحقن', 'prix': '80-400€', 'categorie': 'Injection'},
-        'P03': {'desc_fr': f'Problème allumage ({dtc})', 'desc_ar': f'مشكل إشعال ({dtc})', 'cause_fr': 'Bougies/bobines', 'cause_ar': 'بوجيات/كويلات', 'solution_fr': 'Tester allumage', 'solution_ar': 'افحص الإشعال', 'prix': '80-450€', 'categorie': 'Allumage'},
-        'P07': {'desc_fr': f'Problème transmission ({dtc})', 'desc_ar': f'مشكل علبة سرعة ({dtc})', 'cause_fr': 'Boîte auto', 'cause_ar': 'علبة السرعة', 'solution_fr': 'Diagnostiquer boîte', 'solution_ar': 'شخص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
-        'C': {'desc_fr': f'Problème châssis ({dtc})', 'desc_ar': f'مشكل شاسيه ({dtc})', 'cause_fr': 'ABS/ESP/freins', 'cause_ar': 'ABS/ESP/فرامل', 'solution_fr': 'Diagnostiquer freins', 'solution_ar': 'شخص الفرامل', 'prix': '100-1000€', 'categorie': 'Châssis'},
-        'B': {'desc_fr': f'Problème carrosserie ({dtc})', 'desc_ar': f'مشكل هيكل ({dtc})', 'cause_fr': 'Airbag/habitacle', 'cause_ar': 'وسائد/مقصورة', 'solution_fr': 'Vérifier airbag', 'solution_ar': 'تفقد الوسائد', 'prix': '100-800€', 'categorie': 'Carrosserie'},
-        'U': {'desc_fr': f'Problème réseau ({dtc})', 'desc_ar': f'مشكل شبكة ({dtc})', 'cause_fr': 'CAN Bus', 'cause_ar': 'شبكة CAN', 'solution_fr': 'Vérifier CAN', 'solution_ar': 'تفقد شبكة CAN', 'prix': '150-600€', 'categorie': 'Réseau'},
+    specific_db = {
+        'P0171': {'desc_fr': 'Système trop pauvre (Banque 1)', 'desc_ar': 'نظام الوقود فقير جداً (بنك 1)', 'desc_dar': 'نظام الوقود ضعيف', 'cause_fr': 'Fuite d\'air, MAF, O2', 'cause_ar': 'تسريب هواء، MAF، O2', 'cause_dar': 'تسريب هوا، MAF', 'solution_fr': 'Vérifier fuites, nettoyer MAF', 'solution_ar': 'تفقد التسريب، نظف MAF', 'solution_dar': 'تفقد التسريب و نظف MAF', 'prix': '50-300€', 'categorie': 'Injection'},
+        'P0300': {'desc_fr': 'Ratés d\'allumage multiples', 'desc_ar': 'احتراق عشوائي متعدد', 'desc_dar': 'احتراق عشوائي', 'cause_fr': 'Bougies, bobines', 'cause_ar': 'البوجيات، الكويلات', 'cause_dar': 'البوجيات و الكويلات', 'solution_fr': 'Tester bougies et bobines', 'solution_ar': 'افحص البوجيات والكويلات', 'solution_dar': 'فحص البوجيات والكويلات', 'prix': '100-500€', 'categorie': 'Allumage'},
+        'C0035': {'desc_fr': 'Capteur vitesse roue avant gauche', 'desc_ar': 'حساس سرعة العجلة الأمامية اليسرى', 'desc_dar': 'حساس العجلة اليسرى', 'cause_fr': 'Capteur ABS AVG, câblage', 'cause_ar': 'حساس ABS الأمامي الأيسر، أسلاك', 'cause_dar': 'حساس ABS و الأسلاك', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة اليسرى', 'solution_dar': 'فحص الحساس', 'prix': '100-300€', 'categorie': 'ABS'},
+        'B0000': {'desc_fr': 'Airbag conducteur circuit', 'desc_ar': 'دائرة وسادة السائق', 'desc_dar': 'دائرة الوسادة', 'cause_fr': 'Airbag, câblage', 'cause_ar': 'الوسادة، الأسلاك', 'cause_dar': 'الوسادة و الأسلاك', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'solution_dar': 'فحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
+        'U0100': {'desc_fr': 'Perte communication ECU', 'desc_ar': 'فقدان اتصال الكمبيوتر', 'desc_dar': 'الكمبيوتر ما كيجاوبش', 'cause_fr': 'ECU ne répond pas', 'cause_ar': 'الكمبيوتر لا يستجيب', 'cause_dar': 'الكمبيوتر ما كيجاوبش', 'solution_fr': 'Tester ECU et CAN', 'solution_ar': 'افحص الكمبيوتر وشبكة CAN', 'solution_dar': 'فحص الكمبيوتر و الشبكة', 'prix': '200-1000€', 'categorie': 'Réseau'},
     }
+    
+    if dtc in specific_db:
+        return specific_db[dtc], True
+
+    rules = {
+        'P01': {'desc_fr': f'Problème injection ({dtc})', 'desc_ar': f'مشكل حقن ({dtc})', 'desc_dar': f'مشكل فالحقن ({dtc})', 'cause_fr': 'Système fuel/air', 'cause_ar': 'نظام الوقود/الهواء', 'cause_dar': 'نظام الوقود و الهوا', 'solution_fr': 'Vérifier injection/fuites', 'solution_ar': 'تفقد الحقن/التسريب', 'solution_dar': 'تفقد الحقن و التسريب', 'prix': '80-400€', 'categorie': 'Injection'},
+        'P02': {'desc_fr': f'Problème injecteur ({dtc})', 'desc_ar': f'مشكل بخاخ ({dtc})', 'desc_dar': f'مشكل فالبخاخ ({dtc})', 'cause_fr': 'Injecteur/câblage', 'cause_ar': 'بخاخ/أسلاك', 'cause_dar': 'بخاخ/أسلاك', 'solution_fr': 'Tester injecteur', 'solution_ar': 'افحص البخاخ', 'solution_dar': 'فحص البخاخ', 'prix': '100-500€', 'categorie': 'Injecteurs'},
+        'P03': {'desc_fr': f'Problème allumage ({dtc})', 'desc_ar': f'مشكل إشعال ({dtc})', 'desc_dar': f'مشكل فالإشعال ({dtc})', 'cause_fr': 'Bougies/bobines', 'cause_ar': 'بوجيات/كويلات', 'cause_dar': 'بوجيات/كويلات', 'solution_fr': 'Tester allumage', 'solution_ar': 'افحص الإشعال', 'solution_dar': 'فحص الإشعال', 'prix': '80-450€', 'categorie': 'Allumage'},
+        'P04': {'desc_fr': f'Problème antipollution ({dtc})', 'desc_ar': f'مشكل تلوث ({dtc})', 'desc_dar': f'مشكل فالتلوث ({dtc})', 'cause_fr': 'Catalyseur/EGR/EVAP', 'cause_ar': 'كاتاليزر/EGR/EVAP', 'cause_dar': 'كاتاليزر/EGR', 'solution_fr': 'Vérifier échappement', 'solution_ar': 'تفقد العادم', 'solution_dar': 'تفقد العادم', 'prix': '100-1500€', 'categorie': 'Antipollution'},
+        'P05': {'desc_fr': f'Problème vitesse/régime ({dtc})', 'desc_ar': f'مشكل سرعة/دوران ({dtc})', 'desc_dar': f'مشكل فالسرعة ({dtc})', 'cause_fr': 'Capteurs vitesse', 'cause_ar': 'حساسات السرعة', 'cause_dar': 'حساسات السرعة', 'solution_fr': 'Tester capteurs', 'solution_ar': 'افحص الحساسات', 'solution_dar': 'فحص الحساسات', 'prix': '50-300€', 'categorie': 'Vitesse'},
+        'P06': {'desc_fr': f'Problème calculateur ({dtc})', 'desc_ar': f'مشكل كمبيوتر ({dtc})', 'desc_dar': f'مشكل فالكمبيوتر ({dtc})', 'cause_fr': 'ECU/câblage', 'cause_ar': 'كمبيوتر/أسلاك', 'cause_dar': 'كمبيوتر/أسلاك', 'solution_fr': 'Vérifier ECU', 'solution_ar': 'تفقد الكمبيوتر', 'solution_dar': 'تفقد الكمبيوتر', 'prix': '100-1000€', 'categorie': 'Électronique'},
+        'P07': {'desc_fr': f'Problème transmission ({dtc})', 'desc_ar': f'مشكل علبة سرعة ({dtc})', 'desc_dar': f'مشكل فلعبة ({dtc})', 'cause_fr': 'Boîte auto', 'cause_ar': 'علبة السرعة', 'cause_dar': 'علبة السرعة', 'solution_fr': 'Diagnostiquer boîte', 'solution_ar': 'شخص العلبة', 'solution_dar': 'شخص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
+        'P08': {'desc_fr': f'Problème transmission ({dtc})', 'desc_ar': f'مشكل علبة سرعة ({dtc})', 'desc_dar': f'مشكل فلعبة ({dtc})', 'cause_fr': 'Boîte/embrayage', 'cause_ar': 'علبة/قابض', 'cause_dar': 'علبة/embrayage', 'solution_fr': 'Vérifier transmission', 'solution_ar': 'تفقد العلبة', 'solution_dar': 'تفقد العلبة', 'prix': '150-1500€', 'categorie': 'Transmission'},
+        'B': {'desc_fr': f'Problème carrosserie ({dtc})', 'desc_ar': f'مشكل هيكل ({dtc})', 'desc_dar': f'مشكل فالهيكل ({dtc})', 'cause_fr': 'Airbag/habitacle', 'cause_ar': 'وسائد/مقصورة', 'cause_dar': 'وسائد', 'solution_fr': 'Vérifier airbag', 'solution_ar': 'تفقد الوسائد', 'solution_dar': 'تفقد الوسائد', 'prix': '100-800€', 'categorie': 'Carrosserie'},
+        'C': {'desc_fr': f'Problème châssis ({dtc})', 'desc_ar': f'مشكل شاسيه ({dtc})', 'desc_dar': f'مشكل فالشاسيه ({dtc})', 'cause_fr': 'ABS/ESP/freins', 'cause_ar': 'ABS/ESP/فرامل', 'cause_dar': 'ABS/ESP/فرامل', 'solution_fr': 'Diagnostiquer freins', 'solution_ar': 'شخص الفرامل', 'solution_dar': 'شخص الفرامل', 'prix': '100-1000€', 'categorie': 'Châssis'},
+        'U': {'desc_fr': f'Problème réseau ({dtc})', 'desc_ar': f'مشكل شبكة ({dtc})', 'desc_dar': f'مشكل فالشبكة ({dtc})', 'cause_fr': 'CAN Bus', 'cause_ar': 'شبكة CAN', 'cause_dar': 'شبكة CAN', 'solution_fr': 'Vérifier CAN', 'solution_ar': 'تفقد شبكة CAN', 'solution_dar': 'تفقد الشبكة', 'prix': '150-600€', 'categorie': 'Réseau'},
+    }
+    
     for prefix, info in rules.items():
-        if dtc.startswith(prefix): return info, False
-    return {'desc_fr': f'Code {dtc} inconnu', 'desc_ar': f'كود {dtc} غير معروف', 'cause_fr': 'Consulter manuel', 'cause_ar': 'راجع الدليل', 'solution_fr': 'Diagnostic nécessaire', 'solution_ar': 'تشخيص ضروري', 'prix': 'N/A', 'categorie': 'Inconnue'}, False
+        if dtc.startswith(prefix):
+            return info, False
+        
+    return {'desc_fr': f'Code {dtc} inconnu', 'desc_ar': f'كود {dtc} غير معروف', 'desc_dar': f'كود {dtc} ما معروفش', 'cause_fr': 'Consulter manuel', 'cause_ar': 'راجع الدليل', 'cause_dar': 'راجع الدليل', 'solution_fr': 'Diagnostic nécessaire', 'solution_ar': 'تشخيص ضروري', 'solution_dar': 'خاص التشخيص', 'prix': 'N/A', 'categorie': 'Inconnue'}, False
 
 @st.cache_resource
 def train_model():
@@ -161,128 +229,18 @@ def train_model():
 st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-    
-    /* Global Styles */
     * {{ font-family: 'Inter', sans-serif; }}
-    
-    /* Mercedes Background */
-    .main {{
-        background-image: url('{BACKGROUND_IMAGE}');
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-        min-height: 100vh;
-    }}
-    
-    .stApp {{
-        background: rgba(15, 23, 42, 0.4);
-        backdrop-filter: blur(10px);
-    }}
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {{
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(20px);
-        border-right: 1px solid rgba(0, 0, 0, 0.1);
-    }}
-    
-    /* Glass Cards */
-    .glass-card {{
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(20px);
-        border-radius: 20px;
-        padding: 25px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.5);
-        transition: all 0.3s ease;
-    }}
-    
-    .glass-card:hover {{
-        transform: translateY(-5px);
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-    }}
-    
-    /* Metric Cards */
-    .metric-card {{
-        background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(240,248,255,0.95) 100%);
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-        border: 1px solid rgba(59, 130, 246, 0.2);
-    }}
-    
-    /* Circular Progress */
-    .circular-progress {{
-        background: white;
-        border-radius: 50%;
-        padding: 20px;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    }}
-    
-    /* DTC Item */
-    .dtc-item {{
-        background: rgba(255, 255, 255, 0.95);
-        border-left: 4px solid #3b82f6;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-        transition: all 0.3s ease;
-    }}
-    
-    .dtc-item:hover {{
-        box-shadow: 0 4px 20px rgba(59, 130, 246, 0.2);
-        transform: translateX(5px);
-    }}
-    
-    /* Severity Badges */
-    .badge-critical {{
-        background: linear-gradient(135deg, #ef4444, #dc2626);
-        color: white;
-        padding: 5px 15px;
-        border-radius: 20px;
-        font-size: 0.85em;
-        font-weight: 600;
-    }}
-    
-    .badge-warning {{
-        background: linear-gradient(135deg, #f59e0b, #d97706);
-        color: white;
-        padding: 5px 15px;
-        border-radius: 20px;
-        font-size: 0.85em;
-        font-weight: 600;
-    }}
-    
-    .badge-info {{
-        background: linear-gradient(135deg, #10b981, #059669);
-        color: white;
-        padding: 5px 15px;
-        border-radius: 20px;
-        font-size: 0.85em;
-        font-weight: 600;
-    }}
-    
-    /* Title */
-    h1, h2, h3 {{
-        color: #1e293b !important;
-    }}
-    
-    /* Sidebar Menu */
-    .stRadio > label {{
-        color: #475569;
-        font-weight: 500;
-    }}
-    
-    /* Footer */
-    .footer {{
-        text-align: center;
-        padding: 20px;
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 0.9em;
-        margin-top: 40px;
-    }}
+    .main {{ background-image: url('{BACKGROUND_IMAGE}'); background-size: cover; background-position: center; background-attachment: fixed; min-height: 100vh; }}
+    .stApp {{ background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(10px); }}
+    [data-testid="stSidebar"] {{ background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); border-right: 1px solid rgba(0, 0, 0, 0.1); }}
+    .metric-card {{ background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(240,248,255,0.95) 100%); border-radius: 15px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); }}
+    .severity-high {{ background: #450a0a; border-left: 5px solid #ef5350; padding: 1rem; margin: 1rem 0; border-radius: 8px; color: white; }}
+    .severity-medium {{ background: #451a03; border-left: 5px solid #ffa726; padding: 1rem; margin: 1rem 0; border-radius: 8px; color: white; }}
+    .severity-low {{ background: #052e16; border-left: 5px solid #66bb6a; padding: 1rem; margin: 1rem 0; border-radius: 8px; color: white; }}
+    .info-box {{ background: rgba(255, 255, 255, 0.95); padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); margin-bottom: 1rem; color: #1e293b; border-left: 4px solid #3b82f6; }}
+    h1, h2, h3, h4 {{ color: #1e293b !important; }}
+    h1 {{ text-align: center; color: #f8fafc !important; }}
+    .footer {{ text-align: center; padding: 20px; color: rgba(255, 255, 255, 0.8); margin-top: 40px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -290,13 +248,17 @@ st.markdown(f"""
 # SIDEBAR
 # ============================================================================
 with st.sidebar:
-    # Language Selector
-    lang_choice = st.selectbox("🌐 Language / اللغة", ["Français 🇫🇷", "العربية 🇲🇦"])
-    st.session_state.language = 'ar' if 'العربية' in lang_choice else 'fr'
+    lang_choice = st.selectbox("🌐 Language / اللغة", ["Français 🇫", "العربية 🇸🇦", "الدارجة 🇲🇦"])
+    
+    if 'الدارجة' in lang_choice:
+        st.session_state.language = 'dar'
+    elif 'العربية' in lang_choice:
+        st.session_state.language = 'ar'
+    else:
+        st.session_state.language = 'fr'
     
     t = TRANSLATIONS[st.session_state.language]
     
-    # Logo/Title
     st.markdown("""
     <div style="text-align: center; padding: 20px; margin-bottom: 20px;">
         <h2 style="color: #3b82f6; margin: 0; font-size: 1.8em;">🚗 AutoDiag Pro</h2>
@@ -304,8 +266,6 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     
-    # Navigation
-    st.markdown(f"<h4 style='color: #475569; margin: 20px 0 10px 0;'>{t['sidebar_title']}</h4>", unsafe_allow_html=True)
     menu = st.radio(
         "Navigation",
         [t['dashboard'], t['live_data'], t['dtcs'], t['clear_codes'], t['reports']],
@@ -314,7 +274,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Import Section
     st.subheader(t['import_data'])
     upload_method = st.radio(t['method'], [t['csv'], t['text_ocr'], t['manual']])
     
@@ -348,10 +307,13 @@ st.markdown(f"""
 # Process CSV
 if uploaded_file is not None:
     try:
-        try: df = pd.read_csv(uploaded_file, encoding='utf-8')
+        try:
+            df = pd.read_csv(uploaded_file, encoding='utf-8')
         except:
-            try: df = pd.read_csv(uploaded_file, encoding='latin-1')
-            except: df = pd.read_csv(uploaded_file, encoding='cp1252', sep=';')
+            try:
+                df = pd.read_csv(uploaded_file, encoding='latin-1')
+            except:
+                df = pd.read_csv(uploaded_file, encoding='cp1252', sep=';')
         
         st.success(t['file_loaded'])
         
@@ -359,19 +321,23 @@ if uploaded_file is not None:
         dtc_col = rpm_col = load_col = temp_col = None
         for col in df.columns:
             cl = col.lower()
-            if 'dtc' in cl or 'كود' in cl: dtc_col = col
-            if 'rpm' in cl: rpm_col = col
-            if 'load' in cl: load_col = col
-            if 'temp' in cl: temp_col = col
+            if 'dtc' in cl or 'كود' in cl or 'كود' in cl:
+                dtc_col = col
+            if 'rpm' in cl:
+                rpm_col = col
+            if 'load' in cl:
+                load_col = col
+            if 'temp' in cl:
+                temp_col = col
         
         if not dtc_col:
             for col in df.columns:
-                if df[col].dtype == 'object' and df[col].str.contains(r'P\d{{4}}|C\d{{4}}|B\d{{4}}|U\d{{4}}', regex=True, na=False).any():
+                if df[col].dtype == 'object' and df[col].str.contains(r'P\d{4}|C\d{4}|B\d{4}|U\d{4}', regex=True, na=False).any():
                     dtc_col = col
                     break
         
         if not dtc_col:
-            st.error(t['dtc_col_not_found'])
+            st.error(t.get('dtc_col_not_found', 'Colonne DTC non trouvée!'))
             st.stop()
         
         # Clean data
@@ -382,14 +348,22 @@ if uploaded_file is not None:
         # Analyze
         model, le = train_model()
         results = []
-        lang_key = 'ar' if st.session_state.language == 'ar' else 'fr'
+        
+        if st.session_state.language == 'ar':
+            lang_key = 'ar'
+        elif st.session_state.language == 'dar':
+            lang_key = 'dar'
+        else:
+            lang_key = 'fr'
         
         for idx, row in df.iterrows():
             raw_val = str(row[dtc_col]).strip()
-            if not raw_val or raw_val.lower() in ['none', 'nan', '-', '']: continue
+            if not raw_val or raw_val.lower() in ['none', 'nan', '-', '']:
+                continue
             
             dtc = extract_valid_dtc(raw_val)
-            if not dtc: continue
+            if not dtc:
+                continue
             
             rpm = float(df['RPM'].iloc[idx]) if isinstance(df['RPM'].iloc[idx], (int, float)) else 0.0
             load = float(df['Load'].iloc[idx]) if isinstance(df['Load'].iloc[idx], (int, float)) else 0.0
@@ -397,17 +371,19 @@ if uploaded_file is not None:
             
             info, is_known = get_dtc_info(dtc)
             
-            try: dtc_enc = le.transform([dtc])[0] if dtc in le.classes_ else 0
-            except: dtc_enc = 0
+            try:
+                dtc_enc = le.transform([dtc])[0] if dtc in le.classes_ else 0
+            except:
+                dtc_enc = 0
             
             severity = model.predict([[dtc_enc, rpm, load, temp]])[0]
             
             results.append({
                 'Code': dtc,
-                'Description': info[f'desc_{lang_key}'],
+                'Description': info.get(f'desc_{lang_key}', info.get('desc_fr', 'Unknown')),
                 'Catégorie': info['categorie'],
-                'Cause': info[f'cause_{lang_key}'],
-                'Solution': info[f'solution_{lang_key}'],
+                'Cause': info.get(f'cause_{lang_key}', info.get('cause_fr', 'Unknown')),
+                'Solution': info.get(f'solution_{lang_key}', info.get('solution_fr', 'Unknown')),
                 'Prix': info['prix'],
                 'Sévérité': severity,
                 'Statut': t['known'] if is_known else t['category_detected']
@@ -528,7 +504,6 @@ if uploaded_file is not None:
         
     except Exception as e:
         st.error(f"{t['error']} {str(e)}")
-
 else:
     # Welcome Message
     st.markdown("""
@@ -558,6 +533,6 @@ else:
 # Footer
 st.markdown("""
 <div class="footer">
-    <p>© 2026 AutoDiag Pro - Mercedes Edition | Diagnostic Intelligent & Rapide</p>
+<p>© 2026 AutoDiag Pro - Mercedes Edition | Diagnostic Intelligent & Rapide</p>
 </div>
 """, unsafe_allow_html=True)
