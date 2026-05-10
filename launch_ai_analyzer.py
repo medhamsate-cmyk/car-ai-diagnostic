@@ -7,10 +7,8 @@ from sklearn.preprocessing import LabelEncoder
 from datetime import datetime
 import re
 
-# ============================================================================
-# CONFIGURATION & SESSION STATE (KI7FED L-MOCHKIL DYAL L-REFRESH)
-# ============================================================================
-st.set_page_config(page_title="AutoDiag Pro - Mercedes Edition", layout="wide", page_icon="🚗")
+# Configuration
+st.set_page_config(page_title="AutoDiag Pro", layout="wide", page_icon="🚗")
 
 if 'language' not in st.session_state:
     st.session_state.language = 'fr'
@@ -21,9 +19,6 @@ if 'results_df' not in st.session_state:
 
 BACKGROUND_IMAGE = "https://images.unsplash.com/photo-1618843479313-895a43d5a593?w=1920"
 
-# ============================================================================
-# TRANSLATIONS
-# ============================================================================
 TRANSLATIONS = {
     'fr': {
         'title': 'AutoDiag Pro', 'subtitle': 'Diagnostic Intelligent & Rapide',
@@ -65,9 +60,6 @@ TRANSLATIONS = {
     }
 }
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
 def extract_valid_dtc(value):
     if not value: return None
     value = str(value).strip().upper()
@@ -83,9 +75,9 @@ def clean_numeric(val):
 def get_dtc_info(dtc_code):
     dtc = dtc_code.strip().upper()
     specific_db = {
-        'P0171': {'desc_fr': 'Système trop pauvre (Banque 1)', 'desc_ar': 'نظام الوقود فقير جداً', 'cause_fr': 'Fuite d\'air, MAF, O2', 'cause_ar': 'تسريب هواء، MAF', 'solution_fr': 'Vérifier fuites, nettoyer MAF', 'solution_ar': 'تفقد التسريب، نظف MAF', 'prix': '50-300€', 'categorie': 'Injection'},
+        'P0171': {'desc_fr': 'Système trop pauvre (Banque 1)', 'desc_ar': 'نظام الوقود فقير جداً', 'cause_fr': 'Fuite d\'air, MAF, O2', 'cause_ar': 'تسريب هواء، MAF، O2', 'solution_fr': 'Vérifier fuites, nettoyer MAF', 'solution_ar': 'تفقد التسريب، نظف MAF', 'prix': '50-300€', 'categorie': 'Injection'},
         'P0300': {'desc_fr': 'Ratés d\'allumage multiples', 'desc_ar': 'احتراق عشوائي متعدد', 'cause_fr': 'Bougies, bobines', 'cause_ar': 'البوجيات، الكويلات', 'solution_fr': 'Tester bougies et bobines', 'solution_ar': 'افحص البوجيات والكويلات', 'prix': '100-500€', 'categorie': 'Allumage'},
-        'C0035': {'desc_fr': 'Capteur vitesse roue avant gauche', 'desc_ar': 'حساس سرعة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG, câblage', 'cause_ar': 'حساس ABS، أسلاك', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة اليسرى', 'prix': '100-300€', 'categorie': 'ABS'},
+        'C0035': {'desc_fr': 'Capteur vitesse roue avant gauche', 'desc_ar': 'حساس سرعة العجلة الأمامية اليسرى', 'cause_fr': 'Capteur ABS AVG, câblage', 'cause_ar': 'حساس ABS الأمامي الأيسر، أسلاك', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة اليسرى', 'prix': '100-300€', 'categorie': 'ABS'},
         'B0000': {'desc_fr': 'Airbag conducteur circuit', 'desc_ar': 'دائرة وسادة السائق', 'cause_fr': 'Airbag, câblage', 'cause_ar': 'الوسادة، الأسلاك', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
         'U0100': {'desc_fr': 'Perte communication ECU', 'desc_ar': 'فقدان اتصال الكمبيوتر', 'cause_fr': 'ECU ne répond pas', 'cause_ar': 'الكمبيوتر لا يستجيب', 'solution_fr': 'Tester ECU et CAN', 'solution_ar': 'افحص الكمبيوتر وشبكة CAN', 'prix': '200-1000€', 'categorie': 'Réseau'},
     }
@@ -165,24 +157,34 @@ def process_file(file):
             except: dtc_enc = 0
             severity = model.predict([[dtc_enc, rpm, load, temp]])[0]
             
-            desc_key = f'desc_{lang_key}'
-            cause_key = f'cause_{lang_key}'
-            solution_key = f'solution_{lang_key}'
+            # Use CSV columns if they exist, otherwise use get_dtc_info
+            if lang_key == 'ar':
+                description = row.get('Description', info.get('desc_ar', 'Unknown'))
+                cause = row.get('السبب المحتمل', info.get('cause_ar', 'Unknown'))
+                solution = row.get('الحل', info.get('solution_ar', 'Unknown'))
+                category = row.get('الفئة', info.get('categorie', 'Unknown'))
+                price = row.get('السعر المقدر', info.get('prix', 'N/A'))
+                status = row.get('الحالة', '✅ Connu' if is_known else 'ℹ️ Détecté')
+            else:
+                description = row.get('Description', info.get('desc_fr', 'Unknown'))
+                cause = row.get('cause_fr', info.get('cause_fr', 'Unknown'))
+                solution = row.get('solution_fr', info.get('solution_fr', 'Unknown'))
+                category = row.get('Catégorie', info.get('categorie', 'Unknown'))
+                price = row.get('Prix', info.get('prix', 'N/A'))
+                status = row.get('Statut', '✅ Connu' if is_known else 'ℹ️ Détecté')
             
             results.append({
-                'Code': dtc, 'Description': info.get(desc_key, 'Unknown'),
-                'Catégorie': info['categorie'], 'Cause': info.get(cause_key, 'Unknown'),
-                'Solution': info.get(solution_key, 'Unknown'), 'Prix': info['prix'],
-                'Sévérité': severity, 'Statut': '✅ Connu' if is_known else 'ℹ️ Détecté'
+                'Code': dtc, 'Description': description,
+                'Catégorie': category, 'Cause': cause,
+                'Solution': solution, 'Prix': price,
+                'Sévérité': severity, 'Statut': status
             })
         return pd.DataFrame(results) if results else None
     except Exception as e:
         st.error(f"Erreur: {str(e)}")
         return None
 
-# ============================================================================
-# CSS DESIGN
-# ============================================================================
+# CSS
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
@@ -201,17 +203,15 @@ h1, h2, h3 {{ color: #1e293b !important; }}
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# SIDEBAR & LANGUAGE SWITCHING (KI7FED L-MOCHKIL)
-# ============================================================================
+# Sidebar
 with st.sidebar:
-    lang_options = {"Français 🇫🇷": "fr", "العربية 🇲🇦": "ar"}
+    lang_options = {"Français 🇫🇷": "fr", "العربية 🇲": "ar"}
     selected_label = st.selectbox("🌐 Language / اللغة", list(lang_options.keys()), index=list(lang_options.values()).index(st.session_state.language))
     new_lang = lang_options[selected_label]
     
     if new_lang != st.session_state.language:
         st.session_state.language = new_lang
-        st.rerun()  # كيبدل اللغة بلا ما يمسح البيانات
+        st.rerun()
     
     t = TRANSLATIONS[st.session_state.language]
     
@@ -227,7 +227,6 @@ with st.sidebar:
         if uploaded_file is not None:
             st.session_state.uploaded_file = uploaded_file
             st.success(t['file_loaded'])
-            # Process only once
             if st.session_state.results_df is None:
                 st.session_state.results_df = process_file(uploaded_file)
     elif upload_method == t['manual']:
@@ -236,16 +235,13 @@ with st.sidebar:
         st.number_input(t['load'], value=15, key="manual_load")
         st.number_input(t['temp'], value=90, key="manual_temp")
     
-    # Clear Data Button
     if st.session_state.results_df is not None:
         if st.button(t['clear_data'], type="secondary"):
             st.session_state.uploaded_file = None
             st.session_state.results_df = None
             st.rerun()
 
-# ============================================================================
-# MAIN CONTENT DISPLAY
-# ============================================================================
+# Main Content
 t = TRANSLATIONS[st.session_state.language]
 
 st.markdown(f"""<div class="glass-card" style="margin-bottom: 30px;"><div style="display: flex; align-items: center; justify-content: space-between;"><div><h1 style="margin: 0; color: #1e293b;">{t['title']}</h1><p style="margin: 5px 0 0 0; color: #64748b;">{t['subtitle']}</p></div><div style="font-size: 3em;">🔧</div></div></div>""", unsafe_allow_html=True)
