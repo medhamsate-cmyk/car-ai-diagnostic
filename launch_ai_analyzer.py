@@ -8,21 +8,16 @@ from sklearn.preprocessing import LabelEncoder
 from datetime import datetime
 import re
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
+# Configuration
 st.set_page_config(
     page_title="AutoDiag Pro - Mercedes Edition",
     layout="wide",
     page_icon="🚗"
 )
 
-# Mercedes Interior Background URL
 BACKGROUND_IMAGE = "https://images.unsplash.com/photo-1618843479313-895a43d5a593?w=1920"
 
-# ============================================================================
-# TRANSLATIONS (MSOL7 - Darija Added)
-# ============================================================================
+# Translations - MSOL7 KAMLA
 if 'language' not in st.session_state:
     st.session_state.language = 'fr'
 
@@ -158,9 +153,7 @@ TRANSLATIONS = {
     }
 }
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
+# Helper Functions
 def extract_valid_dtc(value):
     if not value:
         return None
@@ -181,39 +174,249 @@ def get_dtc_info(dtc_code):
     dtc = dtc_code.strip().upper()
     
     specific_db = {
-        'P0171': {'desc_fr': 'Système trop pauvre (Banque 1)', 'desc_ar': 'نظام الوقود فقير جداً (بنك 1)', 'desc_dar': 'نظام الوقود ضعيف', 'cause_fr': 'Fuite d\'air, MAF, O2', 'cause_ar': 'تسريب هواء، MAF، O2', 'cause_dar': 'تسريب هوا، MAF', 'solution_fr': 'Vérifier fuites, nettoyer MAF', 'solution_ar': 'تفقد التسريب، نظف MAF', 'solution_dar': 'تفقد التسريب و نظف MAF', 'prix': '50-300€', 'categorie': 'Injection'},
-        'P0300': {'desc_fr': 'Ratés d\'allumage multiples', 'desc_ar': 'احتراق عشوائي متعدد', 'desc_dar': 'احتراق عشوائي', 'cause_fr': 'Bougies, bobines', 'cause_ar': 'البوجيات، الكويلات', 'cause_dar': 'البوجيات و الكويلات', 'solution_fr': 'Tester bougies et bobines', 'solution_ar': 'افحص البوجيات والكويلات', 'solution_dar': 'فحص البوجيات والكويلات', 'prix': '100-500€', 'categorie': 'Allumage'},
-        'C0035': {'desc_fr': 'Capteur vitesse roue avant gauche', 'desc_ar': 'حساس سرعة العجلة الأمامية اليسرى', 'desc_dar': 'حساس العجلة اليسرى', 'cause_fr': 'Capteur ABS AVG, câblage', 'cause_ar': 'حساس ABS الأمامي الأيسر، أسلاك', 'cause_dar': 'حساس ABS و الأسلاك', 'solution_fr': 'Tester capteur AVG', 'solution_ar': 'افحص حساس العجلة اليسرى', 'solution_dar': 'فحص الحساس', 'prix': '100-300€', 'categorie': 'ABS'},
-        'B0000': {'desc_fr': 'Airbag conducteur circuit', 'desc_ar': 'دائرة وسادة السائق', 'desc_dar': 'دائرة الوسادة', 'cause_fr': 'Airbag, câblage', 'cause_ar': 'الوسادة، الأسلاك', 'cause_dar': 'الوسادة و الأسلاك', 'solution_fr': 'Tester airbag', 'solution_ar': 'افحص الوسادة', 'solution_dar': 'فحص الوسادة', 'prix': '200-800€', 'categorie': 'Airbag'},
-        'U0100': {'desc_fr': 'Perte communication ECU', 'desc_ar': 'فقدان اتصال الكمبيوتر', 'desc_dar': 'الكمبيوتر ما كيجاوبش', 'cause_fr': 'ECU ne répond pas', 'cause_ar': 'الكمبيوتر لا يستجيب', 'cause_dar': 'الكمبيوتر ما كيجاوبش', 'solution_fr': 'Tester ECU et CAN', 'solution_ar': 'افحص الكمبيوتر وشبكة CAN', 'solution_dar': 'فحص الكمبيوتر و الشبكة', 'prix': '200-1000€', 'categorie': 'Réseau'},
+        'P0171': {
+            'desc_fr': 'Système trop pauvre (Banque 1)',
+            'desc_ar': 'نظام الوقود فقير جداً (بنك 1)',
+            'desc_dar': 'نظام الوقود ضعيف',
+            'cause_fr': 'Fuite d\'air, MAF, O2',
+            'cause_ar': 'تسريب هواء، MAF، O2',
+            'cause_dar': 'تسريب هوا، MAF',
+            'solution_fr': 'Vérifier fuites, nettoyer MAF',
+            'solution_ar': 'تفقد التسريب، نظف MAF',
+            'solution_dar': 'تفقد التسريب و نظف MAF',
+            'prix': '50-300€',
+            'categorie': 'Injection'
+        },
+        'P0300': {
+            'desc_fr': 'Ratés d\'allumage multiples',
+            'desc_ar': 'احتراق عشوائي متعدد',
+            'desc_dar': 'احتراق عشوائي',
+            'cause_fr': 'Bougies, bobines',
+            'cause_ar': 'البوجيات، الكويلات',
+            'cause_dar': 'البوجيات و الكويلات',
+            'solution_fr': 'Tester bougies et bobines',
+            'solution_ar': 'افحص البوجيات والكويلات',
+            'solution_dar': 'فحص البوجيات والكويلات',
+            'prix': '100-500€',
+            'categorie': 'Allumage'
+        },
+        'C0035': {
+            'desc_fr': 'Capteur vitesse roue avant gauche',
+            'desc_ar': 'حساس سرعة العجلة الأمامية اليسرى',
+            'desc_dar': 'حساس العجلة اليسرى',
+            'cause_fr': 'Capteur ABS AVG, câblage',
+            'cause_ar': 'حساس ABS الأمامي الأيسر، أسلاك',
+            'cause_dar': 'حساس ABS و الأسلاك',
+            'solution_fr': 'Tester capteur AVG',
+            'solution_ar': 'افحص حساس العجلة اليسرى',
+            'solution_dar': 'فحص الحساس',
+            'prix': '100-300€',
+            'categorie': 'ABS'
+        },
+        'B0000': {
+            'desc_fr': 'Airbag conducteur circuit',
+            'desc_ar': 'دائرة وسادة السائق',
+            'desc_dar': 'دائرة الوسادة',
+            'cause_fr': 'Airbag, câblage',
+            'cause_ar': 'الوسادة، الأسلاك',
+            'cause_dar': 'الوسادة و الأسلاك',
+            'solution_fr': 'Tester airbag',
+            'solution_ar': 'افحص الوسادة',
+            'solution_dar': 'فحص الوسادة',
+            'prix': '200-800€',
+            'categorie': 'Airbag'
+        },
+        'U0100': {
+            'desc_fr': 'Perte communication ECU',
+            'desc_ar': 'فقدان اتصال الكمبيوتر',
+            'desc_dar': 'الكمبيوتر ما كيجاوبش',
+            'cause_fr': 'ECU ne répond pas',
+            'cause_ar': 'الكمبيوتر لا يستجيب',
+            'cause_dar': 'الكمبيوتر ما كيجاوبش',
+            'solution_fr': 'Tester ECU et CAN',
+            'solution_ar': 'افحص الكمبيوتر وشبكة CAN',
+            'solution_dar': 'فحص الكمبيوتر و الشبكة',
+            'prix': '200-1000€',
+            'categorie': 'Réseau'
+        },
     }
     
     if dtc in specific_db:
         return specific_db[dtc], True
 
     rules = {
-        'P01': {'desc_fr': f'Problème injection ({dtc})', 'desc_ar': f'مشكل حقن ({dtc})', 'desc_dar': f'مشكل فالحقن ({dtc})', 'cause_fr': 'Système fuel/air', 'cause_ar': 'نظام الوقود/الهواء', 'cause_dar': 'نظام الوقود و الهوا', 'solution_fr': 'Vérifier injection/fuites', 'solution_ar': 'تفقد الحقن/التسريب', 'solution_dar': 'تفقد الحقن و التسريب', 'prix': '80-400€', 'categorie': 'Injection'},
-        'P02': {'desc_fr': f'Problème injecteur ({dtc})', 'desc_ar': f'مشكل بخاخ ({dtc})', 'desc_dar': f'مشكل فالبخاخ ({dtc})', 'cause_fr': 'Injecteur/câblage', 'cause_ar': 'بخاخ/أسلاك', 'cause_dar': 'بخاخ/أسلاك', 'solution_fr': 'Tester injecteur', 'solution_ar': 'افحص البخاخ', 'solution_dar': 'فحص البخاخ', 'prix': '100-500€', 'categorie': 'Injecteurs'},
-        'P03': {'desc_fr': f'Problème allumage ({dtc})', 'desc_ar': f'مشكل إشعال ({dtc})', 'desc_dar': f'مشكل فالإشعال ({dtc})', 'cause_fr': 'Bougies/bobines', 'cause_ar': 'بوجيات/كويلات', 'cause_dar': 'بوجيات/كويلات', 'solution_fr': 'Tester allumage', 'solution_ar': 'افحص الإشعال', 'solution_dar': 'فحص الإشعال', 'prix': '80-450€', 'categorie': 'Allumage'},
-        'P04': {'desc_fr': f'Problème antipollution ({dtc})', 'desc_ar': f'مشكل تلوث ({dtc})', 'desc_dar': f'مشكل فالتلوث ({dtc})', 'cause_fr': 'Catalyseur/EGR/EVAP', 'cause_ar': 'كاتاليزر/EGR/EVAP', 'cause_dar': 'كاتاليزر/EGR', 'solution_fr': 'Vérifier échappement', 'solution_ar': 'تفقد العادم', 'solution_dar': 'تفقد العادم', 'prix': '100-1500€', 'categorie': 'Antipollution'},
-        'P05': {'desc_fr': f'Problème vitesse/régime ({dtc})', 'desc_ar': f'مشكل سرعة/دوران ({dtc})', 'desc_dar': f'مشكل فالسرعة ({dtc})', 'cause_fr': 'Capteurs vitesse', 'cause_ar': 'حساسات السرعة', 'cause_dar': 'حساسات السرعة', 'solution_fr': 'Tester capteurs', 'solution_ar': 'افحص الحساسات', 'solution_dar': 'فحص الحساسات', 'prix': '50-300€', 'categorie': 'Vitesse'},
-        'P06': {'desc_fr': f'Problème calculateur ({dtc})', 'desc_ar': f'مشكل كمبيوتر ({dtc})', 'desc_dar': f'مشكل فالكمبيوتر ({dtc})', 'cause_fr': 'ECU/câblage', 'cause_ar': 'كمبيوتر/أسلاك', 'cause_dar': 'كمبيوتر/أسلاك', 'solution_fr': 'Vérifier ECU', 'solution_ar': 'تفقد الكمبيوتر', 'solution_dar': 'تفقد الكمبيوتر', 'prix': '100-1000€', 'categorie': 'Électronique'},
-        'P07': {'desc_fr': f'Problème transmission ({dtc})', 'desc_ar': f'مشكل علبة سرعة ({dtc})', 'desc_dar': f'مشكل فلعبة ({dtc})', 'cause_fr': 'Boîte auto', 'cause_ar': 'علبة السرعة', 'cause_dar': 'علبة السرعة', 'solution_fr': 'Diagnostiquer boîte', 'solution_ar': 'شخص العلبة', 'solution_dar': 'شخص العلبة', 'prix': '200-2000€', 'categorie': 'Transmission'},
-        'P08': {'desc_fr': f'Problème transmission ({dtc})', 'desc_ar': f'مشكل علبة سرعة ({dtc})', 'desc_dar': f'مشكل فلعبة ({dtc})', 'cause_fr': 'Boîte/embrayage', 'cause_ar': 'علبة/قابض', 'cause_dar': 'علبة/embrayage', 'solution_fr': 'Vérifier transmission', 'solution_ar': 'تفقد العلبة', 'solution_dar': 'تفقد العلبة', 'prix': '150-1500€', 'categorie': 'Transmission'},
-        'B': {'desc_fr': f'Problème carrosserie ({dtc})', 'desc_ar': f'مشكل هيكل ({dtc})', 'desc_dar': f'مشكل فالهيكل ({dtc})', 'cause_fr': 'Airbag/habitacle', 'cause_ar': 'وسائد/مقصورة', 'cause_dar': 'وسائد', 'solution_fr': 'Vérifier airbag', 'solution_ar': 'تفقد الوسائد', 'solution_dar': 'تفقد الوسائد', 'prix': '100-800€', 'categorie': 'Carrosserie'},
-        'C': {'desc_fr': f'Problème châssis ({dtc})', 'desc_ar': f'مشكل شاسيه ({dtc})', 'desc_dar': f'مشكل فالشاسيه ({dtc})', 'cause_fr': 'ABS/ESP/freins', 'cause_ar': 'ABS/ESP/فرامل', 'cause_dar': 'ABS/ESP/فرامل', 'solution_fr': 'Diagnostiquer freins', 'solution_ar': 'شخص الفرامل', 'solution_dar': 'شخص الفرامل', 'prix': '100-1000€', 'categorie': 'Châssis'},
-        'U': {'desc_fr': f'Problème réseau ({dtc})', 'desc_ar': f'مشكل شبكة ({dtc})', 'desc_dar': f'مشكل فالشبكة ({dtc})', 'cause_fr': 'CAN Bus', 'cause_ar': 'شبكة CAN', 'cause_dar': 'شبكة CAN', 'solution_fr': 'Vérifier CAN', 'solution_ar': 'تفقد شبكة CAN', 'solution_dar': 'تفقد الشبكة', 'prix': '150-600€', 'categorie': 'Réseau'},
+        'P01': {
+            'desc_fr': f'Problème injection ({dtc})',
+            'desc_ar': f'مشكل حقن ({dtc})',
+            'desc_dar': f'مشكل فالحقن ({dtc})',
+            'cause_fr': 'Système fuel/air',
+            'cause_ar': 'نظام الوقود/الهواء',
+            'cause_dar': 'نظام الوقود و الهوا',
+            'solution_fr': 'Vérifier injection/fuites',
+            'solution_ar': 'تفقد الحقن/التسريب',
+            'solution_dar': 'تفقد الحقن و التسريب',
+            'prix': '80-400€',
+            'categorie': 'Injection'
+        },
+        'P02': {
+            'desc_fr': f'Problème injecteur ({dtc})',
+            'desc_ar': f'مشكل بخاخ ({dtc})',
+            'desc_dar': f'مشكل فالبخاخ ({dtc})',
+            'cause_fr': 'Injecteur/câblage',
+            'cause_ar': 'بخاخ/أسلاك',
+            'cause_dar': 'بخاخ/أسلاك',
+            'solution_fr': 'Tester injecteur',
+            'solution_ar': 'افحص البخاخ',
+            'solution_dar': 'فحص البخاخ',
+            'prix': '100-500€',
+            'categorie': 'Injecteurs'
+        },
+        'P03': {
+            'desc_fr': f'Problème allumage ({dtc})',
+            'desc_ar': f'مشكل إشعال ({dtc})',
+            'desc_dar': f'مشكل فالإشعال ({dtc})',
+            'cause_fr': 'Bougies/bobines',
+            'cause_ar': 'بوجيات/كويلات',
+            'cause_dar': 'بوجيات/كويلات',
+            'solution_fr': 'Tester allumage',
+            'solution_ar': 'افحص الإشعال',
+            'solution_dar': 'فحص الإشعال',
+            'prix': '80-450€',
+            'categorie': 'Allumage'
+        },
+        'P04': {
+            'desc_fr': f'Problème antipollution ({dtc})',
+            'desc_ar': f'مشكل تلوث ({dtc})',
+            'desc_dar': f'مشكل فالتلوث ({dtc})',
+            'cause_fr': 'Catalyseur/EGR/EVAP',
+            'cause_ar': 'كاتاليزر/EGR/EVAP',
+            'cause_dar': 'كاتاليزر/EGR',
+            'solution_fr': 'Vérifier échappement',
+            'solution_ar': 'تفقد العادم',
+            'solution_dar': 'تفقد العادم',
+            'prix': '100-1500€',
+            'categorie': 'Antipollution'
+        },
+        'P05': {
+            'desc_fr': f'Problème vitesse/régime ({dtc})',
+            'desc_ar': f'مشكل سرعة/دوران ({dtc})',
+            'desc_dar': f'مشكل فالسرعة ({dtc})',
+            'cause_fr': 'Capteurs vitesse',
+            'cause_ar': 'حساسات السرعة',
+            'cause_dar': 'حساسات السرعة',
+            'solution_fr': 'Tester capteurs',
+            'solution_ar': 'افحص الحساسات',
+            'solution_dar': 'فحص الحساسات',
+            'prix': '50-300€',
+            'categorie': 'Vitesse'
+        },
+        'P06': {
+            'desc_fr': f'Problème calculateur ({dtc})',
+            'desc_ar': f'مشكل كمبيوتر ({dtc})',
+            'desc_dar': f'مشكل فالكمبيوتر ({dtc})',
+            'cause_fr': 'ECU/câblage',
+            'cause_ar': 'كمبيوتر/أسلاك',
+            'cause_dar': 'كمبيوتر/أسلاك',
+            'solution_fr': 'Vérifier ECU',
+            'solution_ar': 'تفقد الكمبيوتر',
+            'solution_dar': 'تفقد الكمبيوتر',
+            'prix': '100-1000€',
+            'categorie': 'Électronique'
+        },
+        'P07': {
+            'desc_fr': f'Problème transmission ({dtc})',
+            'desc_ar': f'مشكل علبة سرعة ({dtc})',
+            'desc_dar': f'مشكل فلعبة ({dtc})',
+            'cause_fr': 'Boîte auto',
+            'cause_ar': 'علبة السرعة',
+            'cause_dar': 'علبة السرعة',
+            'solution_fr': 'Diagnostiquer boîte',
+            'solution_ar': 'شخص العلبة',
+            'solution_dar': 'شخص العلبة',
+            'prix': '200-2000€',
+            'categorie': 'Transmission'
+        },
+        'P08': {
+            'desc_fr': f'Problème transmission ({dtc})',
+            'desc_ar': f'مشكل علبة سرعة ({dtc})',
+            'desc_dar': f'مشكل فلعبة ({dtc})',
+            'cause_fr': 'Boîte/embrayage',
+            'cause_ar': 'علبة/قابض',
+            'cause_dar': 'علبة/embrayage',
+            'solution_fr': 'Vérifier transmission',
+            'solution_ar': 'تفقد العلبة',
+            'solution_dar': 'تفقد العلبة',
+            'prix': '150-1500€',
+            'categorie': 'Transmission'
+        },
+        'B': {
+            'desc_fr': f'Problème carrosserie ({dtc})',
+            'desc_ar': f'مشكل هيكل ({dtc})',
+            'desc_dar': f'مشكل فالهيكل ({dtc})',
+            'cause_fr': 'Airbag/habitacle',
+            'cause_ar': 'وسائد/مقصورة',
+            'cause_dar': 'وسائد',
+            'solution_fr': 'Vérifier airbag',
+            'solution_ar': 'تفقد الوسائد',
+            'solution_dar': 'تفقد الوسائد',
+            'prix': '100-800€',
+            'categorie': 'Carrosserie'
+        },
+        'C': {
+            'desc_fr': f'Problème châssis ({dtc})',
+            'desc_ar': f'مشكل شاسيه ({dtc})',
+            'desc_dar': f'مشكل فالشاسيه ({dtc})',
+            'cause_fr': 'ABS/ESP/freins',
+            'cause_ar': 'ABS/ESP/فرامل',
+            'cause_dar': 'ABS/ESP/فرامل',
+            'solution_fr': 'Diagnostiquer freins',
+            'solution_ar': 'شخص الفرامل',
+            'solution_dar': 'شخص الفرامل',
+            'prix': '100-1000€',
+            'categorie': 'Châssis'
+        },
+        'U': {
+            'desc_fr': f'Problème réseau ({dtc})',
+            'desc_ar': f'مشكل شبكة ({dtc})',
+            'desc_dar': f'مشكل فالشبكة ({dtc})',
+            'cause_fr': 'CAN Bus',
+            'cause_ar': 'شبكة CAN',
+            'cause_dar': 'شبكة CAN',
+            'solution_fr': 'Vérifier CAN',
+            'solution_ar': 'تفقد شبكة CAN',
+            'solution_dar': 'تفقد الشبكة',
+            'prix': '150-600€',
+            'categorie': 'Réseau'
+        },
     }
     
     for prefix, info in rules.items():
         if dtc.startswith(prefix):
             return info, False
         
-    return {'desc_fr': f'Code {dtc} inconnu', 'desc_ar': f'كود {dtc} غير معروف', 'desc_dar': f'كود {dtc} ما معروفش', 'cause_fr': 'Consulter manuel', 'cause_ar': 'راجع الدليل', 'cause_dar': 'راجع الدليل', 'solution_fr': 'Diagnostic nécessaire', 'solution_ar': 'تشخيص ضروري', 'solution_dar': 'خاص التشخيص', 'prix': 'N/A', 'categorie': 'Inconnue'}, False
+    return {
+        'desc_fr': f'Code {dtc} inconnu',
+        'desc_ar': f'كود {dtc} غير معروف',
+        'desc_dar': f'كود {dtc} ما معروفش',
+        'cause_fr': 'Consulter manuel',
+        'cause_ar': 'راجع الدليل',
+        'cause_dar': 'راجع الدليل',
+        'solution_fr': 'Diagnostic nécessaire',
+        'solution_ar': 'تشخيص ضروري',
+        'solution_dar': 'خاص التشخيص',
+        'prix': 'N/A',
+        'categorie': 'Inconnue'
+    }, False
 
 @st.cache_resource
 def train_model():
-    data = {'DTC': ['P0171', 'P0300', 'P0420', 'P0128', 'P0101', 'P0442', 'P0172', 'P0301'], 'RPM': [800, 2200, 1500, 750, 2800, 900, 2000, 2400], 'Load': [15, 45, 35, 10, 60, 20, 40, 50], 'Temp': [90, 95, 105, 70, 110, 88, 92, 98], 'Severity': ['Medium', 'High', 'Medium', 'Low', 'High', 'Low', 'Medium', 'High']}
+    data = {
+        'DTC': ['P0171', 'P0300', 'P0420', 'P0128', 'P0101', 'P0442', 'P0172', 'P0301'],
+        'RPM': [800, 2200, 1500, 750, 2800, 900, 2000, 2400],
+        'Load': [15, 45, 35, 10, 60, 20, 40, 50],
+        'Temp': [90, 95, 105, 70, 110, 88, 92, 98],
+        'Severity': ['Medium', 'High', 'Medium', 'Low', 'High', 'Low', 'Medium', 'High']
+    }
     df = pd.DataFrame(data)
     le = LabelEncoder()
     df['DTC_Enc'] = le.fit_transform(df['DTC'])
@@ -223,32 +426,110 @@ def train_model():
     model.fit(X, y)
     return model, le
 
-# ============================================================================
-# CSS - MERCEDES DESIGN
-# ============================================================================
-st.markdown(f"""
+# CSS - FIXED & IMPROVED
+st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-    * {{ font-family: 'Inter', sans-serif; }}
-    .main {{ background-image: url('{BACKGROUND_IMAGE}'); background-size: cover; background-position: center; background-attachment: fixed; min-height: 100vh; }}
-    .stApp {{ background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(10px); }}
-    [data-testid="stSidebar"] {{ background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); border-right: 1px solid rgba(0, 0, 0, 0.1); }}
-    .metric-card {{ background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(240,248,255,0.95) 100%); border-radius: 15px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); }}
-    .severity-high {{ background: #450a0a; border-left: 5px solid #ef5350; padding: 1rem; margin: 1rem 0; border-radius: 8px; color: white; }}
-    .severity-medium {{ background: #451a03; border-left: 5px solid #ffa726; padding: 1rem; margin: 1rem 0; border-radius: 8px; color: white; }}
-    .severity-low {{ background: #052e16; border-left: 5px solid #66bb6a; padding: 1rem; margin: 1rem 0; border-radius: 8px; color: white; }}
-    .info-box {{ background: rgba(255, 255, 255, 0.95); padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); margin-bottom: 1rem; color: #1e293b; border-left: 4px solid #3b82f6; }}
-    h1, h2, h3, h4 {{ color: #1e293b !important; }}
-    h1 {{ text-align: center; color: #f8fafc !important; }}
-    .footer {{ text-align: center; padding: 20px; color: rgba(255, 255, 255, 0.8); margin-top: 40px; }}
+    
+    * { 
+        font-family: 'Inter', sans-serif; 
+    }
+    
+    .main {
+        background-image: url('https://images.unsplash.com/photo-1618843479313-895a43d5a593?w=1920');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        min-height: 100vh;
+    }
+    
+    .stApp {
+        background: rgba(15, 23, 42, 0.4);
+        backdrop-filter: blur(10px);
+    }
+    
+    [data-testid="stSidebar"] {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border-right: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    
+    .metric-card {
+        background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(240,248,255,0.95) 100%);
+        border-radius: 15px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+    
+    .severity-high {
+        background: #450a0a;
+        border-left: 5px solid #ef5350;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 8px;
+        color: white;
+    }
+    
+    .severity-medium {
+        background: #451a03;
+        border-left: 5px solid #ffa726;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 8px;
+        color: white;
+    }
+    
+    .severity-low {
+        background: #052e16;
+        border-left: 5px solid #66bb6a;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 8px;
+        color: white;
+    }
+    
+    .info-box {
+        background: rgba(255, 255, 255, 0.95);
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        margin-bottom: 1rem;
+        color: #1e293b;
+        border-left: 4px solid #3b82f6;
+    }
+    
+    h1, h2, h3, h4 {
+        color: #1e293b !important;
+    }
+    
+    h1 {
+        text-align: center;
+        color: #f8fafc !important;
+    }
+    
+    .footer {
+        text-align: center;
+        padding: 20px;
+        color: rgba(255, 255, 255, 0.8);
+        margin-top: 40px;
+    }
+    
+    /* Fix for RTL languages */
+    [dir="rtl"] .dtc-item {
+        border-left: none;
+        border-right: 4px solid #3b82f6;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
 # SIDEBAR
-# ============================================================================
 with st.sidebar:
-    lang_choice = st.selectbox("🌐 Language / اللغة", ["Français 🇫", "العربية 🇸🇦", "الدارجة 🇲🇦"])
+    lang_choice = st.selectbox(
+        "🌐 Language / اللغة",
+        ["Français 🇫", "العربية 🇸🇦", "الدارجة 🇲🇦"]
+    )
     
     if 'الدارجة' in lang_choice:
         st.session_state.language = 'dar'
@@ -286,9 +567,7 @@ with st.sidebar:
         st.number_input(t['load'], value=15, key="manual_load")
         st.number_input(t['temp'], value=90, key="manual_temp")
 
-# ============================================================================
 # MAIN CONTENT
-# ============================================================================
 t = TRANSLATIONS[st.session_state.language]
 
 # Header
@@ -321,7 +600,7 @@ if uploaded_file is not None:
         dtc_col = rpm_col = load_col = temp_col = None
         for col in df.columns:
             cl = col.lower()
-            if 'dtc' in cl or 'كود' in cl or 'كود' in cl:
+            if 'dtc' in cl or 'كود' in cl:
                 dtc_col = col
             if 'rpm' in cl:
                 rpm_col = col
@@ -443,11 +722,10 @@ if uploaded_file is not None:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # CIRCULAR PROGRESS & CHARTS
+        # CHARTS
         col_chart1, col_chart2 = st.columns(2)
         
         with col_chart1:
-            # Pie Chart
             fig_pie = px.pie(
                 res_df,
                 names='Catégorie',
@@ -460,7 +738,6 @@ if uploaded_file is not None:
             st.plotly_chart(fig_pie, use_container_width=True)
         
         with col_chart2:
-            # Bar Chart
             severity_counts = res_df['Sévérité'].value_counts()
             fig_bar = px.bar(
                 x=severity_counts.index,
